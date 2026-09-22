@@ -8,21 +8,16 @@ const PORT = 5000;
 app.use(cors());
 app.use(express.json());
 
-// 1. تجربة أن السيرفر يعمل
-app.get('/', (req, res) => {
-  res.send('Server is running successfully!');
-});
-
-// 2. إضافة ملاحظة جديدة (POST /annotations)
+// 1. إضافة ملاحظة جديدة (POST)
 app.post('/annotations', (req, res) => {
-  const { id, user_id, page_url, text_selected, prefix, suffix, annotation, created_at } = req.body;
+  const { id, user_id, page_url, selected_text, prefix, suffix, annotation, created_at } = req.body;
 
-  const sql = `
-    INSERT INTO annotations (id, user_id, page_url, text_selected, prefix, suffix, annotation, created_at)
+  const query = `
+    INSERT INTO annotations (id, user_id, page_url, selected_text, prefix, suffix, annotation, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `;
 
-  db.run(sql, [id, user_id, page_url, text_selected, prefix, suffix, annotation, created_at], function (err) {
+  db.run(query, [id, user_id, page_url, selected_text, prefix, suffix, annotation, created_at], function (err) {
     if (err) {
       return res.status(500).json({ error: err.message });
     }
@@ -30,17 +25,17 @@ app.post('/annotations', (req, res) => {
   });
 });
 
-// 3. جلب ملاحظات صفحة معينة (GET /annotations?url=...)
+// 2. استرجاع الملاحظات حسب رابط الصفحة (GET)
 app.get('/annotations', (req, res) => {
   const pageUrl = req.query.url;
 
   if (!pageUrl) {
-    return res.status(400).json({ error: 'Page URL is required' });
+    return res.status(400).json({ error: 'URL query parameter is required' });
   }
 
-  const sql = `SELECT * FROM annotations WHERE page_url = ?`;
+  const query = `SELECT * FROM annotations WHERE page_url = ?`;
 
-  db.all(sql, [pageUrl], (err, rows) => {
+  db.all(query, [pageUrl], (err, rows) => {
     if (err) {
       return res.status(500).json({ error: err.message });
     }
@@ -48,20 +43,46 @@ app.get('/annotations', (req, res) => {
   });
 });
 
-// 4. حذف ملاحظة (DELETE /annotations/:id)
-app.delete('/annotations/:id', (req, res) => {
+// 3. تعديل ملاحظة موجودة (PUT) - الإضافة الجديدة المطلوبة!
+app.put('/annotations/:id', (req, res) => {
   const { id } = req.params;
-  const sql = `DELETE FROM annotations WHERE id = ?`;
+  const { annotation, selected_text } = req.body;
 
-  db.run(sql, [id], function (err) {
+  const query = `
+    UPDATE annotations 
+    SET annotation = COALESCE(?, annotation),
+        selected_text = COALESCE(?, selected_text)
+    WHERE id = ?
+  `;
+
+  db.run(query, [annotation, selected_text, id], function (err) {
     if (err) {
       return res.status(500).json({ error: err.message });
     }
-    res.json({ message: 'Annotation deleted successfully' });
+    if (this.changes === 0) {
+      return res.status(404).json({ message: 'Annotation not found' });
+    }
+    res.json({ message: 'Annotation updated successfully', id });
   });
 });
 
-// تشغيل السيرفر
+// 4. حذف ملاحظة (DELETE)
+app.delete('/annotations/:id', (req, res) => {
+  const { id } = req.params;
+
+  const query = `DELETE FROM annotations WHERE id = ?`;
+
+  db.run(query, [id], function (err) {
+    if (err) {
+      return res.status(500).json({ error: err.message });
+    }
+    if (this.changes === 0) {
+      return res.status(404).json({ message: 'Annotation not found' });
+    }
+    res.json({ message: 'Annotation deleted successfully', id });
+  });
+});
+
 app.listen(PORT, () => {
   console.log(`Server is running on http://localhost:${PORT}`);
 });

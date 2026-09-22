@@ -1,18 +1,21 @@
 const sqlite3 = require('sqlite3').verbose();
-const path = require('path');
 
-// تحديد مسار وتجهيز ملف قاعدة البيانات
-const dbPath = path.resolve(__dirname, 'database.sqlite');
-const db = new sqlite3.Database(dbPath);
+const db = new sqlite3.Database('./database.sqlite', (err) => {
+  if (err) {
+    console.error('Error opening database:', err.message);
+  } else {
+    console.log('Connected to the SQLite database.');
+  }
+});
 
-// إنشاء جدول الملاحظات عند تشغيل الملف لأول مرة
+// إنشاء جدول الملاحظات بأسماء الأوردة المعتمدة بالاتفاق
 db.serialize(() => {
   db.run(`
     CREATE TABLE IF NOT EXISTS annotations (
       id TEXT PRIMARY KEY,
       user_id TEXT,
       page_url TEXT,
-      text_selected TEXT,
+      selected_text TEXT,
       prefix TEXT,
       suffix TEXT,
       annotation TEXT,
