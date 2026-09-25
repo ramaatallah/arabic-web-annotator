@@ -1,17 +1,17 @@
-// content.js - المسار 1 المكتمل بالكامل (المهام 1 إلى 6)
+// content.js - Workstream A: Content Script Implementation
 
-// 1. إعادة تظليل النصوص المحفوظة عند فتح الصفحة بشرط أن تكون الإضافة مفعلة
+// 1. Restore highlights from local storage on page load if extension is enabled
 function restoreHighlights() {
-  chrome.storage.local.get({ enabled: true, highlights: [] }, (result) => {
-    if (!result.enabled) return; // عدم التنفيذ إذا كانت الإضافة معطلة
+  chrome.storage.local.get({ enabled: true, annotations: [] }, (result) => {
+    if (!result.enabled) return;
 
     const currentUrl = window.location.href;
-    const pageHighlights = result.highlights.filter(h => h.url === currentUrl);
+    const pageAnnotations = result.annotations.filter(a => a.page_url === currentUrl);
 
-    if (pageHighlights.length === 0) return;
+    if (pageAnnotations.length === 0) return;
 
-    pageHighlights.forEach(hl => {
-      highlightSavedText(hl.text);
+    pageAnnotations.forEach(anno => {
+      highlightSavedText(anno.selected_text);
     });
   });
 }
@@ -21,6 +21,7 @@ if (document.readyState === 'complete' || document.readyState === 'interactive')
   restoreHighlights();
 }
 
+// 2. Highlight text within the DOM using <mark> tag
 function highlightSavedText(textToFind) {
   if (!textToFind) return;
 
@@ -44,19 +45,26 @@ function highlightSavedText(textToFind) {
       try {
         range.surroundContents(markNode);
       } catch (e) {
-        // تجاهل الأخطاء البسيطة في التداخل
+        // Ignore minor DOM overlap errors
       }
       break;
     }
   }
 }
 
-// 2. معالجة تحديد النص مع التحقق من زر التفعيل enabled
+// 3. Independent listener for storage state changes
+chrome.storage.onChanged.addListener((changes) => {
+  if (changes.enabled) {
+    console.log("[Annotator] enabled changed to", changes.enabled.newValue);
+  }
+});
+
+// 4. Handle text selection on mouseup event
 document.addEventListener('mouseup', (event) => {
   if (event.target.closest('#arabic-annotator-note-box')) return;
 
   chrome.storage.local.get({ enabled: true }, (result) => {
-    if (!result.enabled) return; // إلغاء التظليل إذا كانت الإضافة معطلة
+    if (!result.enabled) return;
 
     const selection = window.getSelection();
     const selectedText = selection.toString().trim();
@@ -79,12 +87,13 @@ document.addEventListener('mouseup', (event) => {
 
         createNoteBox(event.pageX, event.pageY, selectedText);
       } catch (e) {
-        console.warn("تنبيه: لا يمكن تظليل النص المتقاطع بين عناصر مختلفة.", e);
+        console.warn("Warning: Cannot highlight text spanning across multiple elements.", e);
       }
     }
   });
 });
 
+// 5. Create floating note popup UI
 function createNoteBox(x, y, selectedText) {
   const box = document.createElement('div');
   box.id = 'arabic-annotator-note-box';
@@ -112,39 +121,31 @@ function createNoteBox(x, y, selectedText) {
 
   document.getElementById('arabic-annotator-save-btn').addEventListener('click', () => {
     const noteContent = document.getElementById('arabic-annotator-text').value.trim();
-    
-    const highlightId = 'hl_' + Date.now();
-    const noteId = noteContent ? 'note_' + Date.now() : null;
 
-    const highlightObject = {
-      id: highlightId,
-      url: window.location.href,
-      text: selectedText,
-      color: '#FFD700',
-      createdAt: new Date().toISOString(),
-      noteId: noteId
+    // Align schema directly with approved API contract
+    const annotationObject = {
+      id: 'anno_' + Date.now(),
+      user_id: null,
+      page_url: window.location.href,
+      selected_text: selectedText,
+      annotation: noteContent || null,
+      prefix: "",
+      suffix: "",
+      created_at: new Date().toISOString()
     };
 
-    const noteObject = noteId ? {
-      id: noteId,
-      highlightId: highlightId,
-      text: noteContent,
-      createdAt: new Date().toISOString(),
-      updatedAt: new Date().toISOString()
-    } : null;
+    chrome.storage.local.get({ annotations: [] }, (result) => {
+      const updatedAnnotations = [...result.annotations, annotationObject];
 
-    chrome.storage.local.get({ highlights: [], notes: [] }, (result) => {
-      const updatedHighlights = [...result.highlights, highlightObject];
-      const updatedNotes = noteObject ? [...result.notes, noteObject] : result.notes;
-
-      chrome.storage.local.set({ highlights: updatedHighlights, notes: updatedNotes }, () => {
-        console.log("تم الحفظ بنجاح!");
+      chrome.storage.local.set({ annotations: updatedAnnotations }, () => {
+        console.log("Saved successfully with new schema!");
         removeExistingNoteBox();
       });
     });
   });
 }
 
+// 6. Remove existing note box if present
 function removeExistingNoteBox() {
   const existingBox = document.getElementById('arabic-annotator-note-box');
   if (existingBox) {
