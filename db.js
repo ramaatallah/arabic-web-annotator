@@ -8,7 +8,7 @@ const db = new sqlite3.Database('./database.sqlite', (err) => {
   }
 });
 
-// إنشاء جدول الملاحظات بأسماء الأوردة المعتمدة بالاتفاق
+// create the annotations table if it doesn't exist
 db.serialize(() => {
   db.run(`
     CREATE TABLE IF NOT EXISTS annotations (
