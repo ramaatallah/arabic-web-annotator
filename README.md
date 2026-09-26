@@ -9,8 +9,8 @@ Graduation project, Course/Supervisor: <course or doctor's name>
 | Name | Track |
 |---|---|
 | Rahaf / Sereen (edit names) | Track 1: Highlighting (Content Script) |
-| Rima | Track 2: Popup & Backend connection (Popup + Background) |
-| <Name> | Track 3: Server & Database (Backend) |
+| Rama | Track 2: Popup & Backend connection (Popup + Background) |
+| sireen | Track 3: Server & Database (Backend) |
 
 ## Project structure
 
