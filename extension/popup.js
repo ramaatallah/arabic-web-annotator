@@ -1,4 +1,4 @@
-// ===== 1) Activation and Deactivation Button =====
+// setup the checkbox to enable/disable the extension
 const checkbox = document.getElementById("enabled");
 const status = document.getElementById("status");
 
@@ -16,18 +16,17 @@ checkbox.addEventListener("change", () => {
   showStatus(checkbox.checked);
 });
 
-// ===== 2) List of notes for the current page =====
+//using the background script to fetch annotations from the server
 const list = document.getElementById("list");
 const empty = document.getElementById("empty");
 
-// It renders the list from the array of notes.
+// render the list of annotations in the popup
 function render(annotations) {
-  list.innerHTML = "";                    // clear the old list.
-  empty.hidden = annotations.length > 0;  // hide the "no notes" message if there are notes.
+  list.innerHTML = "";
+  empty.hidden = annotations.length > 0;
 
   for (const a of annotations) {
     const li = document.createElement("li");
-    //get the selected text and the annotation and display them in the list.
     li.textContent = a.selected_text + " : " + a.annotation;
 
     const btn = document.createElement("button");
@@ -39,20 +38,35 @@ function render(annotations) {
   }
 }
 
-// It fetches the saved annotations and displays only those for the current page.
+// refresh the list of annotations from the server
 async function refresh() {
   const [tab] = await chrome.tabs.query({ active: true, currentWindow: true });
-  const { annotations } = await chrome.storage.local.get({ annotations: [] });
-  render(annotations.filter((a) => a.page_url === tab.url));
+
+  chrome.runtime.sendMessage(
+    { type: "GET_ANNOTATIONS", page_url: tab.url },
+    (response) => {
+      if (!response || !response.ok) {
+        empty.hidden = false;
+        empty.textContent = "تعذر الاتصال بالسيرفر";
+        list.innerHTML = "";
+        console.error("[Annotator] Fetch failed:", response && response.error);
+        return;
+      }
+      empty.textContent = "ما في ملاحظات بعد";
+      render(response.data);
+    }
+  );
 }
 
-// It deletes an annotation by its ID and updates the list.
-async function deleteAnnotation(id) {
-  const { annotations } = await chrome.storage.local.get({ annotations: [] });
-  await chrome.storage.local.set({
-    annotations: annotations.filter((a) => a.id !== id),
+// delete annotation from the server via background.js
+function deleteAnnotation(id) {
+  chrome.runtime.sendMessage({ type: "DELETE_ANNOTATION", id }, (response) => {
+    if (!response || !response.ok) {
+      console.error("[Annotator] Delete failed:", response && response.error);
+      return;
+    }
+    refresh();
   });
-  refresh();
 }
 
 refresh();
