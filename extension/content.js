@@ -1,18 +1,23 @@
 // content.js — Track 1: highlighting + note box + restore on reload
+// Annotations now live on the server, reached through background.js.
+// Only the "enabled" toggle stays in chrome.storage.local (a per-browser setting).
 
 // ===== 1) Restore saved highlights when the page loads =====
 function restoreHighlights() {
-  chrome.storage.local.get({ enabled: true, annotations: [] }, (result) => {
+  chrome.storage.local.get({ enabled: true }, (result) => {
     if (!result.enabled) return;
 
     const pageUrl = window.location.href;
-    const pageAnnotations = result.annotations.filter(
-      (ann) => ann.page_url === pageUrl
+    chrome.runtime.sendMessage(
+      { type: "GET_ANNOTATIONS", page_url: pageUrl },
+      (response) => {
+        if (!response || !response.ok) {
+          console.warn("[Annotator] Could not load annotations:", response && response.error);
+          return;
+        }
+        response.data.forEach((ann) => highlightSavedText(ann.selected_text));
+      }
     );
-
-    pageAnnotations.forEach((ann) => {
-      highlightSavedText(ann.selected_text);
-    });
   });
 }
 
@@ -111,6 +116,7 @@ function createNoteBox(x, y, selectedText) {
   box.innerHTML = `
     <div style="margin-bottom: 6px; font-weight: bold; font-size: 12px; color: #333;">إضافة ملاحظة:</div>
     <textarea id="arabic-annotator-text" rows="3" style="width: 180px; padding: 5px; border: 1px solid #ddd; border-radius: 4px; resize: none; font-size: 12px;" placeholder="اكتب ملاحظتك هنا..."></textarea>
+    <div id="arabic-annotator-error" style="color: #c0392b; font-size: 11px; margin-top: 4px; display: none;"></div>
     <div style="margin-top: 8px; text-align: left;">
       <button id="arabic-annotator-save-btn" style="background-color: #4CAF50; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 12px;">حفظ</button>
     </div>
@@ -122,6 +128,7 @@ function createNoteBox(x, y, selectedText) {
     .getElementById("arabic-annotator-save-btn")
     .addEventListener("click", () => {
       const noteContent = document.getElementById("arabic-annotator-text").value.trim();
+      const errorBox = document.getElementById("arabic-annotator-error");
 
       // Matches docs/api-contract.md exactly
       const annotationObject = {
@@ -135,13 +142,21 @@ function createNoteBox(x, y, selectedText) {
         created_at: new Date().toISOString(),
       };
 
-      chrome.storage.local.get({ annotations: [] }, (result) => {
-        const updatedAnnotations = [...result.annotations, annotationObject];
-        chrome.storage.local.set({ annotations: updatedAnnotations }, () => {
+      chrome.runtime.sendMessage(
+        { type: "SAVE_ANNOTATION", annotation: annotationObject },
+        (response) => {
+          if (!response || !response.ok) {
+            console.error("[Annotator] Save failed:", response && response.error);
+            if (errorBox) {
+              errorBox.textContent = "تعذر الحفظ، تأكدي إن السيرفر شغال";
+              errorBox.style.display = "block";
+            }
+            return;
+          }
           console.log("[Annotator] Saved:", annotationObject.id);
           removeExistingNoteBox();
-        });
-      });
+        }
+      );
     });
 }
 
