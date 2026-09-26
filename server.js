@@ -8,7 +8,7 @@ const PORT = 5000;
 app.use(cors());
 app.use(express.json());
 
-// 1. إضافة ملاحظة جديدة (POST)
+// 1. add a new annotation (POST)
 app.post('/annotations', (req, res) => {
   const { id, user_id, page_url, selected_text, prefix, suffix, annotation, created_at } = req.body;
 
@@ -25,7 +25,7 @@ app.post('/annotations', (req, res) => {
   });
 });
 
-// 2. استرجاع الملاحظات حسب رابط الصفحة (GET)
+// 2. retrieve annotations for a specific page (GET)
 app.get('/annotations', (req, res) => {
   const pageUrl = req.query.url;
 
@@ -43,7 +43,7 @@ app.get('/annotations', (req, res) => {
   });
 });
 
-// 3. تعديل ملاحظة موجودة (PUT) - الإضافة الجديدة المطلوبة!
+// 3. update an existing annotation (PUT) - new requirement!
 app.put('/annotations/:id', (req, res) => {
   const { id } = req.params;
   const { annotation, selected_text } = req.body;
@@ -66,7 +66,7 @@ app.put('/annotations/:id', (req, res) => {
   });
 });
 
-// 4. حذف ملاحظة (DELETE)
+// 4. delete an annotation (DELETE)
 app.delete('/annotations/:id', (req, res) => {
   const { id } = req.params;
 

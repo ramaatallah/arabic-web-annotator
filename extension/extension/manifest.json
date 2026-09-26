@@ -3,7 +3,11 @@
   "name": "Arabic Web Annotator",
   "version": "0.1.0",
   "description": "Highlight text and add notes on any web page.",
-  "permissions": ["storage", "activeTab"],
+  "permissions": [
+    "storage",
+    "activeTab",
+    "tabs"
+  ],
   "action": {
     "default_title": "Annotator",
     "default_popup": "popup.html",
@@ -22,9 +26,21 @@
   },
   "content_scripts": [
     {
-      "matches": ["<all_urls>"],
-      "js": ["content.js"],
-      "css": ["styles.css"]
+      "matches": [
+        "<all_urls>"
+      ],
+      "js": [
+        "content.js"
+      ],
+      "css": [
+        "styles.css"
+      ]
     }
+  ],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "host_permissions": [
+    "http://localhost:5000/*"
   ]
 }
