@@ -26,6 +26,18 @@ if (document.readyState === "complete" || document.readyState === "interactive")
   restoreHighlights();
 }
 
+// Tags whose text is never visible on the page (scripts, styles, hidden inputs...)
+const NON_VISIBLE_TAGS = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEXTAREA", "TITLE"]);
+
+function isInsideNonVisibleTag(node) {
+  let el = node.parentElement;
+  while (el) {
+    if (NON_VISIBLE_TAGS.has(el.tagName)) return true;
+    el = el.parentElement;
+  }
+  return false;
+}
+
 // ===== 2) Wrap a piece of text on the page in <mark> =====
 function highlightSavedText(textToFind) {
   if (!textToFind) return;
@@ -34,6 +46,8 @@ function highlightSavedText(textToFind) {
   let node;
 
   while ((node = walker.nextNode())) {
+    if (isInsideNonVisibleTag(node)) continue; // skip <script>/<style>/etc. text
+
     const index = node.nodeValue.indexOf(textToFind);
     if (index !== -1) {
       const range = document.createRange();
@@ -130,14 +144,13 @@ function createNoteBox(x, y, selectedText) {
       const noteContent = document.getElementById("arabic-annotator-text").value.trim();
       const errorBox = document.getElementById("arabic-annotator-error");
 
-      // Matches docs/api-contract.md exactly
       const annotationObject = {
         id: "anno_" + Date.now(),
-        user_id: null, // no login yet
+        user_id: null,
         page_url: window.location.href,
         selected_text: selectedText,
         annotation: noteContent || null,
-        prefix: "", // TODO: capture surrounding words later
+        prefix: "",
         suffix: "",
         created_at: new Date().toISOString(),
       };
