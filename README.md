@@ -1,46 +1,58 @@
 # Arabic Web Annotator
 
-A Chrome extension that lets users highlight text on any web page, attach a note to it, and have it saved to a database — the highlight and note reappear the next time the page is opened.
+إضافة لمتصفح Chrome تتيح للمستخدم تظليل نص في أي صفحة ويب، ثم يتعرّف النظام على الكلمات المهمة داخل النص (أشخاص، مدن، جامعات...) ويصنّفها، ويكتب المستخدم ملاحظة على الجملة المظللة. تُحفظ الجملة وكلماتها وملاحظاتها في قاعدة بيانات، وتعود عند فتح الصفحة مرة أخرى. وفي مرحلة لاحقة يمكن البحث في المحتوى المحفوظ دلالياً باستخدام RDF وSPARQL.
 
-Graduation project, Course/Supervisor: <course or doctor's name>
+> النسخة الحالية تحفظ الملاحظات وتعيد تظليلها. التصنيف التلقائي والبحث الدلالي قيد التطوير (انظروا [حالة المشروع](#حالة-المشروع)).
 
-## Team
 
-| Name | Track |
+## كيف يعمل
+
+1. يظلّل المستخدم نصاً في صفحة ويب، ويفتح صندوق الملاحظة دون تلوين النص بعد.
+2. ترسل الإضافة النص إلى خدمة التعرف على الكيانات (NER).
+3. تعيد الخدمة الكلمات المصنفة داخل النص (النص، النوع، الموقع) فتظهر في قائمة داخل الصندوق.
+4. يكتب المستخدم ملاحظة ويضغط «حفظ».
+5. بعد الحفظ فقط يُلوَّن النص، وتُخزَّن الجملة وكلماتها وملاحظتها في قاعدة البيانات.
+6. عند تمرير الماوس فوق الجملة المظللة تظهر كلماتها المصنفة وملاحظاتها، مع إمكانية إضافة ملاحظات وتعديلها وحذفها.
+
+## الفريق
+
+| الاسم | المسار |
 |---|---|
-| Rahaf / Sereen (edit names) | Track 1: Highlighting (Content Script) |
-| Rama | Track 2: Popup & Backend connection (Popup + Background) |
-| sireen | Track 3: Server & Database (Backend) |
+| Rahaf | المسار 1: الواجهة على الصفحة (`content.js` و`styles.css`) |
+| Rama | المسار 2: التعرف على الكيانات والربط (`ner-service/` و`background.js` و`manifest.json`) |
+| Sireen | المسار 3: التخزين والبحث (`backend/` و`search-service/` والـ popup) |
 
-## Project structure
+## هيكل المشروع
 
 ```
 arabic-web-annotator/
-├── extension/          ← Chrome extension files
+├── extension/            ← ملفات إضافة Chrome
 │   ├── manifest.json
 │   ├── popup.html / popup.js
 │   ├── content.js / styles.css
 │   ├── background.js
 │   └── icons/
-├── backend/             ← Server and database
+├── backend/              ← الخادم وقاعدة البيانات (Node + SQLite)
 │   ├── server.js
 │   ├── db.js
 │   └── package.json
+├── ner-service/          ← خدمة التعرف على الكيانات (Python) — قيد الإنشاء
+├── search-service/       ← خدمة البحث RDF + SPARQL (Python) — قيد الإنشاء
 ├── docs/
-│   └── api-contract.md  ← Agreed data shape between the three tracks
+│   └── api-contract.md   ← الاتفاق على شكل البيانات بين المسارات الثلاثة
 └── README.md
 ```
 
-## Running the extension
+## تشغيل الإضافة
 
-1. Open `chrome://extensions` in Chrome.
-2. Enable **Developer mode** (top right).
-3. Click **Load unpacked** and select the `extension` folder.
-4. Pin the icon from the toolbar puzzle-piece menu.
+1. افتحوا `chrome://extensions` في Chrome.
+2. فعّلوا **Developer mode** (أعلى اليمين).
+3. اضغطوا **Load unpacked** واختاروا مجلد `extension`.
+4. ثبّتوا الأيقونة من قائمة قطعة الأحجية في شريط الأدوات.
 
-After any code change, click the ↻ reload button on the extension's card at `chrome://extensions`.
+بعد أي تعديل على الكود، اضغطوا زر إعادة التحميل ↻ على بطاقة الإضافة في `chrome://extensions`.
 
-## Running the server
+## تشغيل الخادم
 
 ```bash
 cd backend
@@ -48,31 +60,66 @@ npm install
 node server.js
 ```
 
-The server runs on `http://localhost:5000`.
+يعمل الخادم على `http://localhost:5000`. يُنشأ ملف قاعدة البيانات `database.sqlite` داخل مجلد `backend` ولا يُرفع إلى Git.
 
-## API endpoints
+## الخدمات
+
+| الخدمة | المنفذ | الحالة |
+|---|---|---|
+| الخادم (`backend/`) | 5000 | يعمل |
+| التعرف على الكيانات (`ner-service/`) | 8000 | قيد الإنشاء |
+| البحث (`search-service/`) | 8001 | قيد الإنشاء |
+
+تعليمات تشغيل الخدمتين الأخيرتين تُضاف هنا عند جهوزهما.
+
+## الطلبات (API)
+
+الطلبات المنفّذة حالياً في الخادم:
 
 ```
-POST   /annotations          Add a new annotation
-GET    /annotations?url=...  Get annotations for a specific page
-PUT    /annotations/:id      Update an annotation
-DELETE /annotations/:id      Delete an annotation
+POST   /annotations          إضافة ملاحظة جديدة
+GET    /annotations?url=...  جلب ملاحظات صفحة معيّنة
+PUT    /annotations/:id      تعديل ملاحظة
+DELETE /annotations/:id      حذف ملاحظة
 ```
 
-Full data schema is documented in [`docs/api-contract.md`](docs/api-contract.md).
+الطلبات المعتمدة في العقد الجديد (قيد التنفيذ):
 
-## Working on this repo
+```
+POST   /annotations              إضافة جملة مع كلماتها المصنفة وملاحظتها
+GET    /annotations?url=...      جلب جمل الصفحة ومعها الكلمات والملاحظات
+DELETE /annotations/:id          حذف الجملة مع كلماتها وملاحظاتها
+POST   /annotations/:id/notes    إضافة ملاحظة
+PUT    /notes/:id                تعديل ملاحظة
+DELETE /notes/:id                حذف ملاحظة
+```
 
-- One branch per task (`feature/task-name`).
-- One Pull Request per change, reviewed and approved by a teammate before merging.
-- Full workflow details are in the team's Git guide (outside this repo).
+شكل البيانات الكامل في [`docs/api-contract.md`](docs/api-contract.md).
 
-## Project status
+## العمل على المستودع
 
-- [x] Basic extension skeleton
-- [x] Popup: enable toggle and annotations list
-- [x] Backend: create, read, update, delete annotations
-- [x] Popup ↔ Backend connection (`background.js`)
-- [ ] Text selection and highlighting (`content.js`)
-- [ ] Login
-- [ ] Cross-site testing and final polish
+- فرع واحد لكل مهمة (`feature/task-name`).
+- طلب دمج (Pull Request) واحد لكل تعديل، ويراجعه ويوافق عليه أحد أعضاء الفريق قبل الدمج.
+- أي تعديل على شكل البيانات يبدأ بتعديل `docs/api-contract.md` وموافقة الأعضاء الثلاثة.
+- لا نرفع ملفات مولّدة (قاعدة البيانات، `node_modules`، ملفات `*.stackdump`...)، وهي مستثناة في `.gitignore`.
+- تفاصيل خطوات العمل في دليل Git الخاص بالفريق (خارج هذا المستودع).
+
+## حالة المشروع
+
+منجز:
+
+- [x] هيكل الإضافة الأساسي
+- [x] Popup: زر التفعيل وقائمة الملاحظات
+- [x] Backend: إضافة الملاحظات وقراءتها وتعديلها وحذفها
+- [x] ربط الـ Popup بالـ Backend (`background.js`)
+- [x] تحديد النص وتظليله وإعادة تظليله عند فتح الصفحة (بشكل أساسي)
+
+قيد العمل (النسخة 2):
+
+- [ ] اعتماد العقد الجديد `docs/api-contract.md`
+- [ ] الواجهة: التظليل بعد الحفظ فقط، وقائمة الكلمات المصنفة، وبطاقة الملاحظات عند تمرير الماوس، وأكثر من ملاحظة للجملة
+- [ ] الخادم: جداول `annotations` و`notes` و`entities` والطلبات الجديدة
+- [ ] خدمة التعرف على الكيانات (نسخة تجريبية ثم نموذج حقيقي)
+- [ ] الأنطولوجيا وRDF وSPARQL والبحث من الـ popup
+- [ ] تسجيل الدخول
+- [ ] تجربة على مواقع مختلفة ولمسات أخيرة
