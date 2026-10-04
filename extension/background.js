@@ -19,8 +19,14 @@ async function handleMessage(message) {
       return await updateAnnotation(message.id, message.changes);
     case "DELETE_ANNOTATION":
       return await deleteAnnotation(message.id);
-        case "ANALYZE_TEXT":
+    case "ANALYZE_TEXT":
       return await analyzeText(message.text);
+    case "ADD_NOTE":
+      return await addNote(message.annotation_id, message.text);
+    case "UPDATE_NOTE":
+      return await updateNote(message.id, message.text);
+    case "DELETE_NOTE":
+      return await deleteNote(message.id);
     default:
       return { ok: false, error: "نوع رسالة غير معروف: " + message.type };
   }
@@ -85,4 +91,34 @@ async function analyzeText(text) {
   } finally {
     clearTimeout(timer);
   }
+}
+// POST /annotations/:id/notes
+async function addNote(annotationId, text) {
+  const res = await fetch(`${API_BASE}/annotations/${encodeURIComponent(annotationId)}/notes`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+  if (!res.ok) throw new Error("فشل إضافة الملاحظة (status " + res.status + ")");
+  return { ok: true, data: await res.json() };
+}
+
+// PUT /notes/:id
+async function updateNote(id, text) {
+  const res = await fetch(`${API_BASE}/notes/${encodeURIComponent(id)}`, {
+    method: "PUT",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ text }),
+  });
+  if (!res.ok) throw new Error("فشل تعديل الملاحظة (status " + res.status + ")");
+  return { ok: true, data: await res.json() };
+}
+
+// DELETE /notes/:id
+async function deleteNote(id) {
+  const res = await fetch(`${API_BASE}/notes/${encodeURIComponent(id)}`, {
+    method: "DELETE",
+  });
+  if (!res.ok) throw new Error("فشل حذف الملاحظة (status " + res.status + ")");
+  return { ok: true, data: await res.json() };
 }
