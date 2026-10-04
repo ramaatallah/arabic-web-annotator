@@ -1,5 +1,6 @@
 const API_BASE = "http://localhost:5000";
-
+const NER_BASE = "http://localhost:8000";
+const NER_TIMEOUT_MS = 3000;
 
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   handleMessage(message)
@@ -18,6 +19,8 @@ async function handleMessage(message) {
       return await updateAnnotation(message.id, message.changes);
     case "DELETE_ANNOTATION":
       return await deleteAnnotation(message.id);
+        case "ANALYZE_TEXT":
+      return await analyzeText(message.text);
     default:
       return { ok: false, error: "نوع رسالة غير معروف: " + message.type };
   }
@@ -59,4 +62,27 @@ async function deleteAnnotation(id) {
   });
   if (!res.ok) throw new Error("فشل الحذف (status " + res.status + ")");
   return { ok: true, data: await res.json() };
+}
+
+// POST /analyze (خدمة NER) مع مهلة 3 ثواني
+async function analyzeText(text) {
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), NER_TIMEOUT_MS);
+  try {
+    const res = await fetch(`${NER_BASE}/analyze`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ text }),
+      signal: controller.signal,
+    });
+    if (!res.ok) throw new Error("فشل التحليل (status " + res.status + ")");
+    return { ok: true, data: await res.json() };
+  } catch (err) {
+    if (err.name === "AbortError") {
+      throw new Error("انتهت مهلة خدمة التحليل (3 ثواني)");
+    }
+    throw err;
+  } finally {
+    clearTimeout(timer);
+  }
 }
