@@ -1,7 +1,9 @@
-from fastapi import FastAPI
+from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
 
 app = FastAPI()
+
+MAX_LENGTH = 5000
 
 # قائمة الكلمات المعروفة (نسخة تجريبية)
 KNOWN_WORDS = {
@@ -35,4 +37,8 @@ def find_entities(text: str):
 
 @app.post("/analyze")
 def analyze(req: AnalyzeRequest):
+    if not req.text.strip():
+        raise HTTPException(status_code=400, detail="text is empty")
+    if len(req.text) > MAX_LENGTH:
+        raise HTTPException(status_code=400, detail="text is longer than 5000 characters")
     return {"entities": find_entities(req.text)}
