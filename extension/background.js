@@ -15,8 +15,6 @@ async function handleMessage(message) {
       return await saveAnnotation(message.annotation);
     case "GET_ANNOTATIONS":
       return await getAnnotations(message.page_url);
-    case "UPDATE_ANNOTATION":
-      return await updateAnnotation(message.id, message.changes);
     case "DELETE_ANNOTATION":
       return await deleteAnnotation(message.id);
     case "ANALYZE_TEXT":
@@ -50,16 +48,6 @@ async function getAnnotations(pageUrl) {
   return { ok: true, data: await res.json() };
 }
 
-// PUT /annotations
-async function updateAnnotation(id, changes) {
-  const res = await fetch(`${API_BASE}/annotations/${encodeURIComponent(id)}`, {
-    method: "PUT",
-    headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(changes),
-  });
-  if (!res.ok) throw new Error("فشل التعديل (status " + res.status + ")");
-  return { ok: true, data: await res.json() };
-}
 
 // DELETE /annotations
 async function deleteAnnotation(id) {
