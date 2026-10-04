@@ -1,0 +1,35 @@
+[
+  {
+    "text": "درس أحمد في جامعة النجاح في نابلس",
+    "expected": [
+      {"text": "أحمد", "type": "person"},
+      {"text": "جامعة النجاح", "type": "university"},
+      {"text": "نابلس", "type": "city"}
+    ]
+  },
+  {
+    "text": "أعلنت وزارة الصحة في فلسطين عن حملة جديدة",
+    "expected": [
+      {"text": "وزارة الصحة", "type": "organization"},
+      {"text": "فلسطين", "type": "country"}
+    ]
+  },
+  {
+    "text": "زار الوفد مدينة نابلس ثم جامعة بيرزيت",
+    "expected": [
+      {"text": "نابلس", "type": "city"},
+      {"text": "جامعة بيرزيت", "type": "university"}
+    ]
+  },
+  {
+    "text": "يعمل الدكتور خالد في الأردن منذ سنوات",
+    "expected": [
+      {"text": "خالد", "type": "person"},
+      {"text": "الأردن", "type": "country"}
+    ]
+  },
+  {
+    "text": "الطقس جميل اليوم في المدينة",
+    "expected": []
+  }
+]
