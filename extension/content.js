@@ -326,3 +326,77 @@ function applyHighlightToRange(range, annotationData) {
     console.warn('Direct surroundContents failed, wrapping text nodes:', e);
   }
 }
+
+// 6. Hover Card Interaction
+document.addEventListener('mouseover', (e) => {
+  const mark = e.target.closest('.arabic-annotator-highlight');
+  if (mark) {
+    showHoverCard(mark);
+  }
+});
+
+let hoverCardTimeout = null;
+
+function showHoverCard(mark) {
+  clearTimeout(hoverCardTimeout);
+  removeHoverCard();
+
+  const annotationId = mark.dataset.annotationId;
+
+  chrome.storage.local.get({ mock_annotations: [] }, (result) => {
+    const annotation = result.mock_annotations.find(a => a.id === annotationId);
+    if (!annotation) return;
+
+    const rect = mark.getBoundingClientRect();
+    const card = document.createElement('div');
+    card.id = 'arabic-annotator-hover-card';
+    card.style.position = 'absolute';
+    card.style.top = `${rect.bottom + window.scrollY + 6}px`;
+    card.style.left = `${rect.left + window.scrollX}px`;
+    card.style.zIndex = '2147483647';
+    card.style.backgroundColor = '#ffffff';
+    card.style.border = '1px solid #ddd';
+    card.style.borderRadius = '6px';
+    card.style.boxShadow = '0 2px 8px rgba(0,0,0,0.15)';
+    card.style.padding = '10px';
+    card.style.fontSize = '12px';
+    card.style.direction = 'rtl';
+    card.style.minWidth = '220px';
+
+    let notesHtml = '';
+    if (annotation.notes && annotation.notes.length > 0) {
+      notesHtml = annotation.notes.map(n => `<div style="background: #f9f9f9; padding: 4px 6px; border-radius: 4px; margin-top: 4px;">${n.text}</div>`).join('');
+    }
+
+    card.innerHTML = `
+      <div style="font-weight: bold; margin-bottom: 4px;">التظليل المحفوظ</div>
+      ${notesHtml}
+      <div style="margin-top: 8px; display: flex; gap: 4px; justify-content: flex-end;">
+        <button id="arabic-annotator-delete-ann" style="background: #e53935; color: white; border: none; padding: 3px 8px; border-radius: 4px; cursor: pointer;">حذف</button>
+      </div>
+    `;
+
+    document.body.appendChild(card);
+
+    card.addEventListener('mouseleave', () => removeHoverCard());
+    mark.addEventListener('mouseleave', () => {
+      hoverCardTimeout = setTimeout(() => {
+        if (!card.matches(':hover')) removeHoverCard();
+      }, 300);
+    });
+
+    const deleteBtn = card.querySelector('#arabic-annotator-delete-ann');
+    if (deleteBtn) {
+      deleteBtn.addEventListener('click', async () => {
+        await send({ type: 'DELETE_ANNOTATION', id: annotationId });
+        mark.replaceWith(document.createTextNode(mark.textContent));
+        removeHoverCard();
+      });
+    }
+  });
+}
+
+function removeHoverCard() {
+  const card = document.getElementById('arabic-annotator-hover-card');
+  if (card) card.remove();
+}
