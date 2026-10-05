@@ -160,6 +160,21 @@ function handleMockResponse(message) {
   });
 }
 
+// Step 13: Global UI Cleanup Listener (Close floating boxes when clicking outside or pressing Escape)
+document.addEventListener('mousedown', (e) => {
+  const box = document.getElementById('arabic-annotator-box');
+  if (box && !box.contains(e.target)) {
+    removeAnnotatorBox();
+  }
+});
+
+document.addEventListener('keydown', (e) => {
+  if (e.key === 'Escape') {
+    removeAnnotatorBox();
+    removeHoverCard();
+  }
+});
+
 // 2. Selection Event Handling & Early Un-highlighting
 let currentSelectionRange = null;
 
@@ -477,7 +492,6 @@ function showHoverCard(mark) {
       }
     });
 
-    // Step 12: Delete Annotation Action & DOM Removal Handler
     const deleteAnnBtn = card.querySelector('#arabic-annotator-delete-ann');
     if (deleteAnnBtn) {
       deleteAnnBtn.addEventListener('click', () => handleDeleteAnnotation(annotationId));
@@ -485,7 +499,7 @@ function showHoverCard(mark) {
   });
 }
 
-// Step 12 Action Handler
+// 12. Delete Annotation Action Handler
 async function handleDeleteAnnotation(annotationId) {
   try {
     const response = await send({ type: 'DELETE_ANNOTATION', id: annotationId });
