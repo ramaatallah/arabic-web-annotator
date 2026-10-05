@@ -174,6 +174,32 @@ function handleTextSelection(e) {
     // Immediately clear default blue highlighting
     selection.removeAllRanges();
 
-    console.log('Text selected and saved in range:', selectedText);
+    // Process selection positioning and NER analysis (Step 3)
+    processSelection(selectedText, currentSelectionRange);
+  }
+}
+
+// 3. Positioning and Initial Entity Analysis
+async function processSelection(selectedText, range) {
+  // Get text coordinates relative to viewport
+  const rect = range.getBoundingClientRect();
+  const position = {
+    top: rect.bottom + window.scrollY + 8, // Position slightly below the selection
+    left: rect.left + window.scrollX
+  };
+
+  try {
+    // Send request to analyze selected text for entities
+    const response = await send({ type: 'ANALYZE_TEXT', text: selectedText });
+    const entities = response.ok ? response.data : [];
+
+    // Trigger UI presentation (Step 4)
+    if (typeof showAnnotatorBox === 'function') {
+      showAnnotatorBox(selectedText, range, position, entities);
+    } else {
+      console.log('Selection processed:', { selectedText, position, entities });
+    }
+  } catch (err) {
+    console.error('Error analyzing text:', err);
   }
 }
