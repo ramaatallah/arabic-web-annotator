@@ -315,12 +315,10 @@ function getSurroundingContext(range, length = 30) {
 // 9. Multi-node / Cross-element Selection Support Implementation
 function applyHighlightToRange(range, annotationData) {
   try {
-    // Attempt simple single-node surround first
     if (range.startContainer === range.endContainer && range.startContainer.nodeType === Node.TEXT_NODE) {
       const mark = createHighlightElement(annotationData.id);
       range.surroundContents(mark);
     } else {
-      // Step 9: Handle cross-node / multi-element selection safely
       highlightMultiNodeRange(range, annotationData.id);
     }
   } catch (e) {
@@ -381,7 +379,7 @@ function highlightMultiNodeRange(range, annotationId) {
   });
 }
 
-// 6. Hover Card Interaction
+// 6 & 10. Hover Card Interaction and Note Management (Add, Edit, Delete Notes)
 document.addEventListener('mouseover', (e) => {
   const mark = e.target.closest('.arabic-annotator-highlight');
   if (mark) {
@@ -415,18 +413,31 @@ function showHoverCard(mark) {
     card.style.padding = '10px';
     card.style.fontSize = '12px';
     card.style.direction = 'rtl';
-    card.style.minWidth = '220px';
+    card.style.minWidth = '240px';
 
+    // Step 10: Render Notes List with Edit & Delete actions
     let notesHtml = '';
     if (annotation.notes && annotation.notes.length > 0) {
-      notesHtml = annotation.notes.map(n => `<div style="background: #f9f9f9; padding: 4px 6px; border-radius: 4px; margin-top: 4px;">${n.text}</div>`).join('');
+      notesHtml = annotation.notes.map(n => `
+        <div class="note-item" data-note-id="${n.id}" style="background: #f9f9f9; padding: 6px; border-radius: 4px; margin-top: 4px; display: flex; justify-content: space-between; align-items: center;">
+          <span class="note-text">${n.text}</span>
+          <div style="display: flex; gap: 4px;">
+            <button class="btn-edit-note" style="border:none; background:none; cursor:pointer; color:#1976d2; font-size:10px;">تعديل</button>
+            <button class="btn-delete-note" style="border:none; background:none; cursor:pointer; color:#e53935; font-size:10px;">حذف</button>
+          </div>
+        </div>
+      `).join('');
     }
 
     card.innerHTML = `
-      <div style="font-weight: bold; margin-bottom: 4px;">التظليل المحفوظ</div>
-      ${notesHtml}
-      <div style="margin-top: 8px; display: flex; gap: 4px; justify-content: flex-end;">
-        <button id="arabic-annotator-delete-ann" style="background: #e53935; color: white; border: none; padding: 3px 8px; border-radius: 4px; cursor: pointer;">حذف</button>
+      <div style="font-weight: bold; margin-bottom: 4px; color: #333;">التظليل المحفوظ</div>
+      <div id="notes-container">${notesHtml}</div>
+      <div style="margin-top: 8px;">
+        <input type="text" id="new-note-input" placeholder="إضافة ملاحظة جديدة..." style="width: 100%; padding: 4px; font-size: 11px; border: 1px solid #ccc; border-radius: 4px; box-sizing: border-box;" />
+        <button id="btn-add-note" style="margin-top: 4px; width: 100%; background: #1976d2; color: white; border: none; padding: 4px; border-radius: 4px; cursor: pointer; font-size: 11px;">إضافة ملاحظة</button>
+      </div>
+      <div style="margin-top: 8px; border-top: 1px solid #eee; padding-top: 6px; display: flex; justify-content: flex-end;">
+        <button id="arabic-annotator-delete-ann" style="background: #e53935; color: white; border: none; padding: 3px 8px; border-radius: 4px; cursor: pointer; font-size: 11px;">حذف التظليل كامل</button>
       </div>
     `;
 
@@ -439,11 +450,41 @@ function showHoverCard(mark) {
       }, 300);
     });
 
-    const deleteBtn = card.querySelector('#arabic-annotator-delete-ann');
-    if (deleteBtn) {
-      deleteBtn.addEventListener('click', async () => {
+    // Step 10 Action: Add New Note
+    card.querySelector('#btn-add-note').addEventListener('click', async () => {
+      const input = card.querySelector('#new-note-input');
+      const text = input ? input.value.trim() : '';
+      if (text) {
+        await send({ type: 'ADD_NOTE', annotation_id: annotationId, text: text });
+        showHoverCard(mark);
+      }
+    });
+
+    // Step 10 Actions: Edit & Delete Note Event Delegation
+    card.querySelector('#notes-container').addEventListener('click', async (e) => {
+      const noteItem = e.target.closest('.note-item');
+      if (!noteItem) return;
+      const noteId = noteItem.dataset.noteId;
+
+      if (e.target.classList.contains('btn-delete-note')) {
+        await send({ type: 'DELETE_NOTE', id: noteId });
+        showHoverCard(mark);
+      } else if (e.target.classList.contains('btn-edit-note')) {
+        const textSpan = noteItem.querySelector('.note-text');
+        const currentText = textSpan.textContent;
+        const newText = prompt('تعديل الملاحظة:', currentText);
+        if (newText !== null && newText.trim() !== '') {
+          await send({ type: 'UPDATE_NOTE', id: noteId, text: newText.trim() });
+          showHoverCard(mark);
+        }
+      }
+    });
+
+    // Delete Entire Annotation Action
+    const deleteAnnBtn = card.querySelector('#arabic-annotator-delete-ann');
+    if (deleteAnnBtn) {
+      deleteAnnBtn.addEventListener('click', async () => {
         await send({ type: 'DELETE_ANNOTATION', id: annotationId });
-        // Remove all marks associated with this annotation ID (Step 9 support)
         const allMarks = document.querySelectorAll(`mark[data-annotation-id="${annotationId}"]`);
         allMarks.forEach(m => m.replaceWith(document.createTextNode(m.textContent)));
         removeHoverCard();
