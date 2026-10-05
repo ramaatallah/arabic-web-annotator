@@ -203,3 +203,64 @@ async function processSelection(selectedText, range) {
     console.error('Error analyzing text:', err);
   }
 }
+
+// 4. Floating Action Box UI Construction
+function showAnnotatorBox(selectedText, range, position, entities = []) {
+  removeAnnotatorBox();
+
+  const box = document.createElement('div');
+  box.id = 'arabic-annotator-box';
+  box.style.position = 'absolute';
+  box.style.top = `${position.top}px`;
+  box.style.left = `${position.left}px`;
+  box.style.zIndex = '2147483647';
+  box.style.backgroundColor = '#ffffff';
+  box.style.border = '1px solid #e0e0e0';
+  box.style.borderRadius = '8px';
+  box.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
+  box.style.padding = '12px';
+  box.style.fontFamily = 'sans-serif';
+  box.style.direction = 'rtl';
+  box.style.minWidth = '260px';
+
+  let entitiesHtml = '';
+  if (entities.length > 0) {
+    entitiesHtml = `
+      <div style="margin-bottom: 8px; font-size: 12px; color: #555;">
+        <strong>الكيانات المكتشفة:</strong>
+        <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px;">
+          ${entities.map(e => `<span style="background: #e3f2fd; color: #1565c0; padding: 2px 6px; border-radius: 4px; font-size: 11px;">${e.text} (${e.type})</span>`).join('')}
+        </div>
+      </div>
+    `;
+  }
+
+  box.innerHTML = `
+    ${entitiesHtml}
+    <textarea id="arabic-annotator-note" placeholder="أضف ملاحظة (اختياري)..." style="width: 100%; height: 50px; margin-bottom: 8px; padding: 6px; border: 1px solid #ccc; border-radius: 4px; font-size: 12px; resize: none; box-sizing: border-box;"></textarea>
+    <div style="display: flex; justify-content: flex-end; gap: 6px;">
+      <button id="arabic-annotator-cancel" style="padding: 4px 10px; background: #f5f5f5; border: 1px solid #ccc; border-radius: 4px; cursor: pointer; font-size: 12px;">إلغاء</button>
+      <button id="arabic-annotator-save" style="padding: 4px 10px; background: #1976d2; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">حفظ</button>
+    </div>
+  `;
+
+  document.body.appendChild(box);
+
+  document.getElementById('arabic-annotator-cancel').addEventListener('click', removeAnnotatorBox);
+  document.getElementById('arabic-annotator-save').addEventListener('click', () => {
+    const noteText = document.getElementById('arabic-annotator-note').value;
+    if (typeof handleSaveAnnotation === 'function') {
+      handleSaveAnnotation(selectedText, range, entities, noteText);
+    } else {
+      console.log('Save triggered:', { selectedText, noteText, entities });
+      removeAnnotatorBox();
+    }
+  });
+}
+
+function removeAnnotatorBox() {
+  const existing = document.getElementById('arabic-annotator-box');
+  if (existing) {
+    existing.remove();
+  }
+}
