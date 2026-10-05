@@ -1,34 +1,27 @@
 <!DOCTYPE html>
 <html lang="ar" dir="rtl">
 <head>
-  <meta charset="utf-8">
-  <title>Annotator</title>
+  <meta charset="UTF-8">
+  <title>الإضافة</title>
   <style>
-    body { width: 300px; margin: 0; padding: 14px; font-family: Tahoma, "Segoe UI", Arial, sans-serif; font-size: 14px; }
-    h1 { font-size: 16px; margin: 0 0 12px; }
-    h2 { font-size: 14px; margin: 16px 0 8px; }
-    label { display: flex; align-items: center; gap: 8px; cursor: pointer; }
-    #status { margin: 10px 0 0; color: #555; font-size: 13px; }
-    #list { list-style: none; margin: 0; padding: 0; }
-    #list li { display: flex; align-items: center; justify-content: space-between; gap: 8px;
-               padding: 8px 0; border-bottom: 1px solid #ddd; }
-    #empty { color: #777; }
+    body {
+      width: 200px;
+      padding: 15px;
+      font-family: sans-serif;
+      text-align: center;
+    }
+    .toggle-container {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+    }
   </style>
 </head>
 <body>
-  <h1>Annotator</h1>
-
-  <label>
-    <input type="checkbox" id="enabled">
-    تفعيل الملاحظات
-  </label>
-  <p id="status"></p>
-
-  <h2>ملاحظات الصفحة</h2>
-  <ul id="list"></ul>
-  <p id="empty" hidden>لا يوجد ملاحظات بعد</p>
-
+  <div class="toggle-container">
+    <span>تفعيل الإضافة</span>
+    <input type="checkbox" id="toggle-enable">
+  </div>
   <script src="popup.js"></script>
 </body>
 </html>
-
