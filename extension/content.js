@@ -400,3 +400,52 @@ function removeHoverCard() {
   const card = document.getElementById('arabic-annotator-hover-card');
   if (card) card.remove();
 }
+
+// 7. On-load Annotation Restoration
+document.addEventListener('DOMContentLoaded', restorePageAnnotations);
+
+if (document.readyState === 'interactive' || document.readyState === 'complete') {
+  restorePageAnnotations();
+}
+
+async function restorePageAnnotations() {
+  try {
+    const response = await send({ type: 'GET_ANNOTATIONS', url: window.location.href });
+    if (response.ok && Array.isArray(response.data)) {
+      response.data.forEach(annotation => {
+        restoreSingleAnnotation(annotation);
+      });
+    }
+  } catch (err) {
+    console.error('Error restoring annotations:', err);
+  }
+}
+
+function restoreSingleAnnotation(annotation) {
+  const { id, selected_text, prefix, suffix } = annotation;
+  
+  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
+  let node;
+
+  while ((node = walker.nextNode())) {
+    const text = node.nodeValue;
+    const index = text.indexOf(selected_text);
+
+    if (index !== -1) {
+      const nodePrefix = text.substring(Math.max(0, index - prefix.length), index);
+      const nodeSuffix = text.substring(index + selected_text.length, index + selected_text.length + suffix.length);
+
+      const prefixMatches = !prefix || nodePrefix.endsWith(prefix) || prefix.endsWith(nodePrefix);
+      const suffixMatches = !suffix || nodeSuffix.startsWith(suffix) || suffix.startsWith(nodeSuffix);
+
+      if (prefixMatches || suffixMatches) {
+        const range = document.createRange();
+        range.setStart(node, index);
+        range.setEnd(node, index + selected_text.length);
+
+        applyHighlightToRange(range, { id });
+        break;
+      }
+    }
+  }
+}
