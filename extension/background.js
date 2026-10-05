@@ -1,14 +1,15 @@
 // extension/content.js - Workstream A: Content Script Implementation
 
 // 1. Mock Configuration and Central Communication Function
+// Step 14: Switch all MOCK flags to false for real background/backend integration
 const MOCK = {
-  ANALYZE_TEXT: true,
-  SAVE_ANNOTATION: true,
-  GET_ANNOTATIONS: true,
-  ADD_NOTE: true,
-  UPDATE_NOTE: true,
-  DELETE_NOTE: true,
-  DELETE_ANNOTATION: true
+  ANALYZE_TEXT: false,
+  SAVE_ANNOTATION: false,
+  GET_ANNOTATIONS: false,
+  ADD_NOTE: false,
+  UPDATE_NOTE: false,
+  DELETE_NOTE: false,
+  DELETE_ANNOTATION: false
 };
 
 async function send(message) {
@@ -160,7 +161,7 @@ function handleMockResponse(message) {
   });
 }
 
-// Step 13: Global UI Cleanup Listener (Close floating boxes when clicking outside or pressing Escape)
+// 13. Global UI Cleanup Listener
 document.addEventListener('mousedown', (e) => {
   const box = document.getElementById('arabic-annotator-box');
   if (box && !box.contains(e.target)) {
