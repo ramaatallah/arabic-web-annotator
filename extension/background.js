@@ -166,7 +166,6 @@ let currentSelectionRange = null;
 document.addEventListener('mouseup', handleTextSelection);
 
 function handleTextSelection(e) {
-  // Step 8 Guard: Ignore clicks inside extension popups or controls
   if (e.target.closest('#arabic-annotator-box') || e.target.closest('#arabic-annotator-hover-card')) {
     return;
   }
@@ -176,7 +175,6 @@ function handleTextSelection(e) {
 
   const selectedText = selection.toString().trim();
 
-  // Step 8 Edge Case: Ignore empty or whitespace-only selections
   if (selectedText.length === 0) {
     return;
   }
@@ -185,7 +183,6 @@ function handleTextSelection(e) {
     const range = selection.getRangeAt(0);
     currentSelectionRange = range.cloneRange();
 
-    // Clear default blue highlight
     selection.removeAllRanges();
 
     processSelection(selectedText, currentSelectionRange);
@@ -315,29 +312,73 @@ function getSurroundingContext(range, length = 30) {
   }
 }
 
+// 9. Multi-node / Cross-element Selection Support Implementation
 function applyHighlightToRange(range, annotationData) {
+  try {
+    // Attempt simple single-node surround first
+    if (range.startContainer === range.endContainer && range.startContainer.nodeType === Node.TEXT_NODE) {
+      const mark = createHighlightElement(annotationData.id);
+      range.surroundContents(mark);
+    } else {
+      // Step 9: Handle cross-node / multi-element selection safely
+      highlightMultiNodeRange(range, annotationData.id);
+    }
+  } catch (e) {
+    console.warn('surroundContents failed, falling back to multi-node handler:', e);
+    highlightMultiNodeRange(range, annotationData.id);
+  }
+}
+
+function createHighlightElement(annotationId) {
   const mark = document.createElement('mark');
   mark.className = 'arabic-annotator-highlight';
-  mark.dataset.annotationId = annotationData.id;
+  mark.dataset.annotationId = annotationId;
   mark.style.backgroundColor = '#fff59d';
   mark.style.color = 'inherit';
   mark.style.padding = '2px 0';
   mark.style.borderRadius = '3px';
   mark.style.cursor = 'pointer';
+  return mark;
+}
 
-  try {
-    range.surroundContents(mark);
-  } catch (e) {
-    // Step 8 Fallback: Handle range spanning multiple DOM elements
-    console.warn('Direct surroundContents failed, using safe fallback:', e);
-    try {
-      const fragment = range.extractContents();
-      mark.appendChild(fragment);
-      range.insertNode(mark);
-    } catch (fallbackErr) {
-      console.error('Failed to apply highlight fallback:', fallbackErr);
+function highlightMultiNodeRange(range, annotationId) {
+  const textNodes = [];
+  const treeWalker = document.createTreeWalker(
+    range.commonAncestorContainer,
+    NodeFilter.SHOW_TEXT,
+    {
+      acceptNode: (node) => {
+        return range.intersectsNode(node) ? NodeFilter.FILTER_ACCEPT : NodeFilter.FILTER_REJECT;
+      }
     }
+  );
+
+  while (treeWalker.nextNode()) {
+    textNodes.push(treeWalker.currentNode);
   }
+
+  textNodes.forEach(node => {
+    if (!node.nodeValue.trim()) return;
+
+    const subRange = document.createRange();
+    let startOffset = 0;
+    let endOffset = node.nodeValue.length;
+
+    if (node === range.startContainer) startOffset = range.startOffset;
+    if (node === range.endContainer) endOffset = range.endOffset;
+
+    if (startOffset < endOffset) {
+      subRange.setStart(node, startOffset);
+      subRange.setEnd(node, endOffset);
+
+      const mark = createHighlightElement(annotationId);
+      try {
+        subRange.surroundContents(mark);
+      } catch (err) {
+        console.error('Error highlighting sub-range node:', err);
+      }
+    }
+  });
 }
 
 // 6. Hover Card Interaction
@@ -402,7 +443,9 @@ function showHoverCard(mark) {
     if (deleteBtn) {
       deleteBtn.addEventListener('click', async () => {
         await send({ type: 'DELETE_ANNOTATION', id: annotationId });
-        mark.replaceWith(document.createTextNode(mark.textContent));
+        // Remove all marks associated with this annotation ID (Step 9 support)
+        const allMarks = document.querySelectorAll(`mark[data-annotation-id="${annotationId}"]`);
+        allMarks.forEach(m => m.replaceWith(document.createTextNode(m.textContent)));
         removeHoverCard();
       });
     }
