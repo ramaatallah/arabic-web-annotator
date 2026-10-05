@@ -264,3 +264,65 @@ function removeAnnotatorBox() {
     existing.remove();
   }
 }
+
+// 5. Annotation Creation & Persistent Highlighting
+async function handleSaveAnnotation(selectedText, range, entities = [], noteText = '') {
+  // Extract surrounding context (prefix and suffix) for robust anchor matching
+  const context = getSurroundingContext(range);
+
+  const annotationPayload = {
+    type: 'SAVE_ANNOTATION',
+    page_url: window.location.href,
+    selected_text: selectedText,
+    prefix: context.prefix,
+    suffix: context.suffix,
+    start_offset: range.startOffset,
+    end_offset: range.endOffset,
+    entities: entities,
+    note: noteText.trim()
+  };
+
+  try {
+    const response = await send(annotationPayload);
+    if (response.ok) {
+      // Highlight the range in DOM
+      applyHighlightToRange(range, response.data);
+      removeAnnotatorBox();
+    } else {
+      console.error('Failed to save annotation:', response.error);
+    }
+  } catch (err) {
+    console.error('Error saving annotation:', err);
+  }
+}
+
+function getSurroundingContext(range, length = 30) {
+  const container = range.commonAncestorContainer;
+  const fullText = container.textContent || '';
+  
+  const start = range.startOffset;
+  const end = range.endOffset;
+
+  const prefix = fullText.substring(Math.max(0, start - length), start);
+  const suffix = fullText.substring(end, Math.min(fullText.length, end + length));
+
+  return { prefix, suffix };
+}
+
+function applyHighlightToRange(range, annotationData) {
+  const mark = document.createElement('mark');
+  mark.className = 'arabic-annotator-highlight';
+  mark.dataset.annotationId = annotationData.id;
+  mark.style.backgroundColor = '#fff59d';
+  mark.style.color = 'inherit';
+  mark.style.padding = '2px 0';
+  mark.style.borderRadius = '3px';
+  mark.style.cursor = 'pointer';
+
+  try {
+    range.surroundContents(mark);
+  } catch (e) {
+    // Fallback if range spans multiple node boundaries
+    console.warn('Direct surroundContents failed, wrapping text nodes:', e);
+  }
+}
