@@ -379,7 +379,7 @@ function highlightMultiNodeRange(range, annotationId) {
   });
 }
 
-// 6 & 10. Hover Card Interaction and Note Management (Add, Edit, Delete Notes)
+// 6 & 10. Hover Card Interaction and Note Management
 document.addEventListener('mouseover', (e) => {
   const mark = e.target.closest('.arabic-annotator-highlight');
   if (mark) {
@@ -415,7 +415,6 @@ function showHoverCard(mark) {
     card.style.direction = 'rtl';
     card.style.minWidth = '240px';
 
-    // Step 10: Render Notes List with Edit & Delete actions
     let notesHtml = '';
     if (annotation.notes && annotation.notes.length > 0) {
       notesHtml = annotation.notes.map(n => `
@@ -450,7 +449,6 @@ function showHoverCard(mark) {
       }, 300);
     });
 
-    // Step 10 Action: Add New Note
     card.querySelector('#btn-add-note').addEventListener('click', async () => {
       const input = card.querySelector('#new-note-input');
       const text = input ? input.value.trim() : '';
@@ -460,7 +458,6 @@ function showHoverCard(mark) {
       }
     });
 
-    // Step 10 Actions: Edit & Delete Note Event Delegation
     card.querySelector('#notes-container').addEventListener('click', async (e) => {
       const noteItem = e.target.closest('.note-item');
       if (!noteItem) return;
@@ -480,7 +477,6 @@ function showHoverCard(mark) {
       }
     });
 
-    // Delete Entire Annotation Action
     const deleteAnnBtn = card.querySelector('#arabic-annotator-delete-ann');
     if (deleteAnnBtn) {
       deleteAnnBtn.addEventListener('click', async () => {
@@ -498,7 +494,7 @@ function removeHoverCard() {
   if (card) card.remove();
 }
 
-// 7. On-load Annotation Restoration
+// 7 & 11. On-load Annotation Restoration & Robust Context Matching Algorithm
 document.addEventListener('DOMContentLoaded', restorePageAnnotations);
 
 if (document.readyState === 'interactive' || document.readyState === 'complete') {
@@ -518,32 +514,60 @@ async function restorePageAnnotations() {
   }
 }
 
+// Step 11: Enhanced Context Matching Algorithm
 function restoreSingleAnnotation(annotation) {
   const { id, selected_text, prefix, suffix } = annotation;
   if (!selected_text) return;
   
   const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
   let node;
+  let candidateNode = null;
+  let candidateIndex = -1;
+  let highestScore = -1;
 
   while ((node = walker.nextNode())) {
     const text = node.nodeValue;
-    const index = text.indexOf(selected_text);
+    let index = text.indexOf(selected_text);
 
-    if (index !== -1) {
+    while (index !== -1) {
+      let score = 0;
       const nodePrefix = text.substring(Math.max(0, index - (prefix ? prefix.length : 0)), index);
       const nodeSuffix = text.substring(index + selected_text.length, index + selected_text.length + (suffix ? suffix.length : 0));
 
-      const prefixMatches = !prefix || nodePrefix.endsWith(prefix) || prefix.endsWith(nodePrefix);
-      const suffixMatches = !suffix || nodeSuffix.startsWith(suffix) || suffix.startsWith(nodeSuffix);
+      if (prefix && (nodePrefix.endsWith(prefix) || prefix.endsWith(nodePrefix))) score += 2;
+      if (suffix && (nodeSuffix.startsWith(suffix) || suffix.startsWith(nodeSuffix))) score += 2;
 
-      if (prefixMatches || suffixMatches) {
-        const range = document.createRange();
-        range.setStart(node, index);
-        range.setEnd(node, index + selected_text.length);
+      if (score > highestScore) {
+        highestScore = score;
+        candidateNode = node;
+        candidateIndex = index;
+      }
 
-        applyHighlightToRange(range, { id });
+      index = text.indexOf(selected_text, index + 1);
+    }
+  }
+
+  // Fallback if no contextual match score but exact text exists
+  if (!candidateNode) {
+    const fallbackWalker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
+    while ((node = fallbackWalker.nextNode())) {
+      const idx = node.nodeValue.indexOf(selected_text);
+      if (idx !== -1) {
+        candidateNode = node;
+        candidateIndex = idx;
         break;
       }
+    }
+  }
+
+  if (candidateNode && candidateIndex !== -1) {
+    try {
+      const range = document.createRange();
+      range.setStart(candidateNode, candidateIndex);
+      range.setEnd(candidateNode, candidateIndex + selected_text.length);
+      applyHighlightToRange(range, { id });
+    } catch (e) {
+      console.error('Failed to apply restored range:', e);
     }
   }
 }
