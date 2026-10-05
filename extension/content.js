@@ -1,182 +1,153 @@
-// content.js — Track 1: highlighting + note box + restore on reload
-// Annotations now live on the server, reached through background.js.
-// Only the "enabled" toggle stays in chrome.storage.local (a per-browser setting).
+// extension/content.js - Workstream A: Content Script Implementation
 
-// ===== 1) Restore saved highlights when the page loads =====
-function restoreHighlights() {
-  chrome.storage.local.get({ enabled: true }, (result) => {
-    if (!result.enabled) return;
+// 1. Mock Configuration and Central Communication Function
+const MOCK = {
+  ANALYZE_TEXT: true,
+  SAVE_ANNOTATION: true,
+  GET_ANNOTATIONS: true,
+  ADD_NOTE: true,
+  UPDATE_NOTE: true,
+  DELETE_NOTE: true,
+  DELETE_ANNOTATION: true
+};
 
-    const pageUrl = window.location.href;
-    chrome.runtime.sendMessage(
-      { type: "GET_ANNOTATIONS", page_url: pageUrl },
-      (response) => {
-        if (!response || !response.ok) {
-          console.warn("[Annotator] Could not load annotations:", response && response.error);
-          return;
-        }
-        response.data.forEach((ann) => highlightSavedText(ann.selected_text));
-      }
-    );
-  });
-}
+async function send(message) {
+  const type = message.type;
 
-document.addEventListener("DOMContentLoaded", restoreHighlights);
-if (document.readyState === "complete" || document.readyState === "interactive") {
-  restoreHighlights();
-}
-
-// Tags whose text is never visible on the page (scripts, styles, hidden inputs...)
-const NON_VISIBLE_TAGS = new Set(["SCRIPT", "STYLE", "NOSCRIPT", "TEXTAREA", "TITLE"]);
-
-function isInsideNonVisibleTag(node) {
-  let el = node.parentElement;
-  while (el) {
-    if (NON_VISIBLE_TAGS.has(el.tagName)) return true;
-    el = el.parentElement;
+  if (MOCK[type]) {
+    return handleMockResponse(message);
   }
-  return false;
-}
 
-// ===== 2) Wrap a piece of text on the page in <mark> =====
-function highlightSavedText(textToFind) {
-  if (!textToFind) return;
-
-  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
-  let node;
-
-  while ((node = walker.nextNode())) {
-    if (isInsideNonVisibleTag(node)) continue; // skip <script>/<style>/etc. text
-
-    const index = node.nodeValue.indexOf(textToFind);
-    if (index !== -1) {
-      const range = document.createRange();
-      range.setStart(node, index);
-      range.setEnd(node, index + textToFind.length);
-
-      const markNode = document.createElement("mark");
-      markNode.style.backgroundColor = "#FFD700";
-      markNode.style.color = "#000000";
-      markNode.style.borderRadius = "3px";
-      markNode.style.padding = "1px 3px";
-      markNode.className = "arabic-annotator-highlight";
-
-      try {
-        range.surroundContents(markNode);
-      } catch (e) {
-        // Ignore minor DOM overlap errors
-      }
-      break;
-    }
-  }
-}
-
-// ===== 3) Listen for the enable/disable toggle =====
-chrome.storage.onChanged.addListener((changes) => {
-  if (changes.enabled) {
-    console.log("[Annotator] enabled changed to", changes.enabled.newValue);
-  }
-});
-
-// ===== 4) Handle text selection on mouseup =====
-document.addEventListener("mouseup", (event) => {
-  if (event.target.closest("#arabic-annotator-note-box")) return;
-
-  chrome.storage.local.get({ enabled: true }, (result) => {
-    if (!result.enabled) return;
-
-    const selection = window.getSelection();
-    const selectedText = selection.toString().trim();
-
-    removeExistingNoteBox();
-
-    if (selectedText.length > 0 && selection.rangeCount > 0) {
-      const range = selection.getRangeAt(0);
-
-      const markNode = document.createElement("mark");
-      markNode.style.backgroundColor = "#FFD700";
-      markNode.style.color = "#000000";
-      markNode.style.borderRadius = "3px";
-      markNode.style.padding = "1px 3px";
-      markNode.className = "arabic-annotator-highlight";
-
-      try {
-        range.surroundContents(markNode);
-        selection.removeAllRanges();
-        createNoteBox(event.pageX, event.pageY, selectedText);
-      } catch (e) {
-        console.warn("Warning: Cannot highlight text spanning across multiple elements.", e);
-      }
-    }
-  });
-});
-
-// ===== 5) Floating note box UI =====
-function createNoteBox(x, y, selectedText) {
-  const box = document.createElement("div");
-  box.id = "arabic-annotator-note-box";
-  box.style.position = "absolute";
-  box.style.left = `${x}px`;
-  box.style.top = `${y + 10}px`;
-  box.style.backgroundColor = "#ffffff";
-  box.style.border = "1px solid #ccc";
-  box.style.borderRadius = "8px";
-  box.style.padding = "10px";
-  box.style.boxShadow = "0px 4px 12px rgba(0,0,0,0.15)";
-  box.style.zIndex = "999999";
-  box.style.direction = "rtl";
-  box.style.fontFamily = "sans-serif";
-
-  box.innerHTML = `
-    <div style="margin-bottom: 6px; font-weight: bold; font-size: 12px; color: #333;">إضافة ملاحظة:</div>
-    <textarea id="arabic-annotator-text" rows="3" style="width: 180px; padding: 5px; border: 1px solid #ddd; border-radius: 4px; resize: none; font-size: 12px;" placeholder="اكتب ملاحظتك هنا..."></textarea>
-    <div id="arabic-annotator-error" style="color: #c0392b; font-size: 11px; margin-top: 4px; display: none;"></div>
-    <div style="margin-top: 8px; text-align: left;">
-      <button id="arabic-annotator-save-btn" style="background-color: #4CAF50; color: white; border: none; padding: 5px 10px; border-radius: 4px; cursor: pointer; font-size: 12px;">حفظ</button>
-    </div>
-  `;
-
-  document.body.appendChild(box);
-
-  document
-    .getElementById("arabic-annotator-save-btn")
-    .addEventListener("click", () => {
-      const noteContent = document.getElementById("arabic-annotator-text").value.trim();
-      const errorBox = document.getElementById("arabic-annotator-error");
-
-      const annotationObject = {
-        id: "anno_" + Date.now(),
-        user_id: null,
-        page_url: window.location.href,
-        selected_text: selectedText,
-        annotation: noteContent || null,
-        prefix: "",
-        suffix: "",
-        created_at: new Date().toISOString(),
-      };
-
-      chrome.runtime.sendMessage(
-        { type: "SAVE_ANNOTATION", annotation: annotationObject },
-        (response) => {
-          if (!response || !response.ok) {
-            console.error("[Annotator] Save failed:", response && response.error);
-            if (errorBox) {
-              errorBox.textContent = "تعذر الحفظ، تأكدي إن السيرفر شغال";
-              errorBox.style.display = "block";
-            }
-            return;
-          }
-          console.log("[Annotator] Saved:", annotationObject.id);
-          removeExistingNoteBox();
-        }
-      );
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage(message, (response) => {
+      resolve(response || { ok: false, error: "No response from background script" });
     });
+  });
 }
 
-// ===== 6) Remove the note box if one is open =====
-function removeExistingNoteBox() {
-  const existingBox = document.getElementById("arabic-annotator-note-box");
-  if (existingBox) {
-    existingBox.remove();
-  }
+function handleMockResponse(message) {
+  return new Promise((resolve) => {
+    switch (message.type) {
+      case 'ANALYZE_TEXT': {
+        const text = message.text || '';
+        const mockEntities = [];
+        if (text.includes('أحمد')) {
+          const start = text.indexOf('أحمد');
+          mockEntities.push({ text: 'أحمد', type: 'person', start: start, end: start + 4 });
+        }
+        if (text.includes('جامعة النجاح')) {
+          const start = text.indexOf('جامعة النجاح');
+          mockEntities.push({ text: 'جامعة النجاح', type: 'university', start: start, end: start + 12 });
+        }
+        if (text.includes('نابلس')) {
+          const start = text.indexOf('نابلس');
+          mockEntities.push({ text: 'نابلس', type: 'city', start: start, end: start + 5 });
+        }
+        resolve({ ok: true, data: mockEntities });
+        break;
+      }
+
+      case 'SAVE_ANNOTATION': {
+        chrome.storage.local.get({ mock_annotations: [] }, (result) => {
+          const annotations = result.mock_annotations;
+          const newAnnotation = {
+            id: 'ann_' + Date.now(),
+            user_id: null,
+            page_url: message.page_url,
+            selected_text: message.selected_text,
+            prefix: message.prefix || '',
+            suffix: message.suffix || '',
+            start_offset: message.start_offset || 0,
+            end_offset: message.end_offset || 0,
+            created_at: new Date().toISOString(),
+            entities: message.entities || [],
+            notes: message.note ? [{ id: 'note_' + Date.now(), text: message.note, created_at: new Date().toISOString() }] : []
+          };
+          annotations.push(newAnnotation);
+          chrome.storage.local.set({ mock_annotations: annotations }, () => {
+            resolve({ ok: true, data: newAnnotation });
+          });
+        });
+        break;
+      }
+
+      case 'GET_ANNOTATIONS': {
+        chrome.storage.local.get({ mock_annotations: [] }, (result) => {
+          const pageAnnotations = result.mock_annotations.filter(ann => ann.page_url === message.url);
+          resolve({ ok: true, data: pageAnnotations });
+        });
+        break;
+      }
+
+      case 'ADD_NOTE': {
+        chrome.storage.local.get({ mock_annotations: [] }, (result) => {
+          const annotations = result.mock_annotations;
+          const ann = annotations.find(a => a.id === message.annotation_id);
+          if (ann) {
+            const newNote = { id: 'note_' + Date.now(), text: message.text, created_at: new Date().toISOString() };
+            ann.notes = ann.notes || [];
+            ann.notes.push(newNote);
+            chrome.storage.local.set({ mock_annotations: annotations }, () => {
+              resolve({ ok: true, data: newNote });
+            });
+          } else {
+            resolve({ ok: false, error: "Annotation not found" });
+          }
+        });
+        break;
+      }
+
+      case 'UPDATE_NOTE': {
+        chrome.storage.local.get({ mock_annotations: [] }, (result) => {
+          const annotations = result.mock_annotations;
+          let updatedNote = null;
+          annotations.forEach(ann => {
+            if (ann.notes) {
+              const note = ann.notes.find(n => n.id === message.id);
+              if (note) {
+                note.text = message.text;
+                updatedNote = note;
+              }
+            }
+          });
+          if (updatedNote) {
+            chrome.storage.local.set({ mock_annotations: annotations }, () => {
+              resolve({ ok: true, data: updatedNote });
+            });
+          } else {
+            resolve({ ok: false, error: "Note not found" });
+          }
+        });
+        break;
+      }
+
+      case 'DELETE_NOTE': {
+        chrome.storage.local.get({ mock_annotations: [] }, (result) => {
+          const annotations = result.mock_annotations;
+          annotations.forEach(ann => {
+            if (ann.notes) {
+              ann.notes = ann.notes.filter(n => n.id !== message.id);
+            }
+          });
+          chrome.storage.local.set({ mock_annotations: annotations }, () => {
+            resolve({ ok: true, data: { deleted: true } });
+          });
+        });
+        break;
+      }
+
+      case 'DELETE_ANNOTATION': {
+        chrome.storage.local.get({ mock_annotations: [] }, (result) => {
+          const annotations = result.mock_annotations.filter(a => a.id !== message.id);
+          chrome.storage.local.set({ mock_annotations: annotations }, () => {
+            resolve({ ok: true, data: { deleted: true } });
+          });
+        });
+        break;
+      }
+
+      default:
+        resolve({ ok: false, error: "Unknown message type" });
+    }
+  });
 }
