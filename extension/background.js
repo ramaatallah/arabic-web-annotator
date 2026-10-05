@@ -477,15 +477,36 @@ function showHoverCard(mark) {
       }
     });
 
+    // Step 12: Delete Annotation Action & DOM Removal Handler
     const deleteAnnBtn = card.querySelector('#arabic-annotator-delete-ann');
     if (deleteAnnBtn) {
-      deleteAnnBtn.addEventListener('click', async () => {
-        await send({ type: 'DELETE_ANNOTATION', id: annotationId });
-        const allMarks = document.querySelectorAll(`mark[data-annotation-id="${annotationId}"]`);
-        allMarks.forEach(m => m.replaceWith(document.createTextNode(m.textContent)));
-        removeHoverCard();
-      });
+      deleteAnnBtn.addEventListener('click', () => handleDeleteAnnotation(annotationId));
     }
+  });
+}
+
+// Step 12 Action Handler
+async function handleDeleteAnnotation(annotationId) {
+  try {
+    const response = await send({ type: 'DELETE_ANNOTATION', id: annotationId });
+    if (response && response.ok) {
+      removeHighlightFromDOM(annotationId);
+      removeHoverCard();
+    }
+  } catch (err) {
+    console.error('Error deleting annotation:', err);
+  }
+}
+
+function removeHighlightFromDOM(annotationId) {
+  const marks = document.querySelectorAll(`mark[data-annotation-id="${annotationId}"]`);
+  marks.forEach(mark => {
+    const parent = mark.parentNode;
+    while (mark.firstChild) {
+      parent.insertBefore(mark.firstChild, mark);
+    }
+    mark.remove();
+    parent.normalize();
   });
 }
 
@@ -494,7 +515,7 @@ function removeHoverCard() {
   if (card) card.remove();
 }
 
-// 7 & 11. On-load Annotation Restoration & Robust Context Matching Algorithm
+// 7 & 11. On-load Annotation Restoration & Robust Context Matching
 document.addEventListener('DOMContentLoaded', restorePageAnnotations);
 
 if (document.readyState === 'interactive' || document.readyState === 'complete') {
@@ -514,7 +535,6 @@ async function restorePageAnnotations() {
   }
 }
 
-// Step 11: Enhanced Context Matching Algorithm
 function restoreSingleAnnotation(annotation) {
   const { id, selected_text, prefix, suffix } = annotation;
   if (!selected_text) return;
@@ -547,7 +567,6 @@ function restoreSingleAnnotation(annotation) {
     }
   }
 
-  // Fallback if no contextual match score but exact text exists
   if (!candidateNode) {
     const fallbackWalker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
     while ((node = fallbackWalker.nextNode())) {
