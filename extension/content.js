@@ -151,3 +151,29 @@ function handleMockResponse(message) {
     }
   });
 }
+
+// 2. Selection Event Handling & Early Un-highlighting
+let currentSelectionRange = null;
+
+document.addEventListener('mouseup', handleTextSelection);
+
+function handleTextSelection(e) {
+  // Ignore clicks inside extension popups or controls if any
+  if (e.target.closest('#arabic-annotator-box') || e.target.closest('#arabic-annotator-hover-card')) {
+    return;
+  }
+
+  const selection = window.getSelection();
+  const selectedText = selection.toString().trim();
+
+  if (selectedText.length > 0) {
+    const range = selection.getRangeAt(0);
+    // Store the selected range for later processing
+    currentSelectionRange = range.cloneRange();
+
+    // Immediately clear default blue highlighting
+    selection.removeAllRanges();
+
+    console.log('Text selected and saved in range:', selectedText);
+  }
+}
