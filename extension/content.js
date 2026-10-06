@@ -280,9 +280,40 @@ function applyHighlightToRange(range, annotationData) {
   }
 }
 
+const ENTITY_TYPE_LABELS = {
+  person: "شخص",
+  city: "مدينة",
+  country: "دولة",
+  university: "جامعة",
+  organization: "منظمة"
+};
+
+let activeHoverMark = null;
+
+function entityTypeLabel(type) {
+  return ENTITY_TYPE_LABELS[type] || type;
+}
+
+function scheduleHoverCardRemoval() {
+  clearTimeout(hoverCardTimeout);
+  hoverCardTimeout = setTimeout(() => {
+    const card = document.getElementById("arabic-annotator-hover-card");
+    if (activeHoverMark?.matches(":hover") || card?.matches(":hover")) return;
+    removeHoverCard();
+  }, 350);
+}
+
 document.addEventListener("mouseover", (event) => {
   const mark = event.target.closest(".arabic-annotator-highlight");
-  if (mark) showHoverCard(mark);
+  if (!mark) return;
+  if (activeHoverMark === mark && document.getElementById("arabic-annotator-hover-card")) return;
+  activeHoverMark = mark;
+  showHoverCard(mark);
+});
+
+document.addEventListener("mouseout", (event) => {
+  const mark = event.target.closest(".arabic-annotator-highlight");
+  if (mark && !mark.contains(event.relatedTarget)) scheduleHoverCardRemoval();
 });
 
 async function showHoverCard(mark) {
@@ -299,39 +330,143 @@ async function showHoverCard(mark) {
   const rect = mark.getBoundingClientRect();
   const card = document.createElement("div");
   card.id = "arabic-annotator-hover-card";
-  card.style.cssText = `position:absolute;top:${rect.bottom + window.scrollY + 6}px;left:${rect.left + window.scrollX}px;z-index:2147483647;background:#fff;border:1px solid #ddd;border-radius:6px;box-shadow:0 2px 8px rgba(0,0,0,.15);padding:10px;font-size:12px;direction:rtl;min-width:220px`;
+  card.className = "arabic-annotator-hover-card";
+  card.style.top = `${rect.bottom + window.scrollY + 6}px`;
+  card.style.left = `${Math.max(8, rect.left + window.scrollX)}px`;
 
-  const entitiesHtml = (annotation.entities || []).length
-    ? `<div style="margin-bottom:6px"><strong>الكلمات:</strong> ${(annotation.entities || []).map((entity) => `${escapeHtml(entity.text)} (${escapeHtml(entity.type)})`).join("، ")}</div>`
-    : "";
-  const notesHtml = (annotation.notes || []).length
-    ? (annotation.notes || []).map((note) => `<div style="background:#f9f9f9;padding:4px 6px;border-radius:4px;margin-top:4px">${escapeHtml(note.text)}</div>`).join("")
-    : '<div style="color:#777">لا توجد ملاحظات</div>';
+  renderHoverCard(card, annotation);
+  document.body.appendChild(card);
+
+  card.addEventListener("mouseenter", () => clearTimeout(hoverCardTimeout));
+  card.addEventListener("mouseleave", scheduleHoverCardRemoval);
+}
+
+function renderHoverCard(card, annotation) {
+  const entities = Array.isArray(annotation.entities) ? annotation.entities : [];
+  const notes = Array.isArray(annotation.notes) ? annotation.notes : [];
+
+  const entitiesHtml = entities.length
+    ? `<div class="arabic-annotator-section">
+         <div class="arabic-annotator-section-title">التصنيف</div>
+         <div class="arabic-annotator-entities">
+           ${entities.map((entity) => `
+             <span class="arabic-annotator-entity">
+               <span>${escapeHtml(entity.text)}</span>
+               <small>${escapeHtml(entityTypeLabel(entity.type))}</small>
+             </span>
+           `).join("")}
+         </div>
+       </div>`
+    : `<div class="arabic-annotator-section">
+         <div class="arabic-annotator-section-title">التصنيف</div>
+         <div class="arabic-annotator-empty">لا توجد كيانات مصنفة</div>
+       </div>`;
+
+  const notesHtml = notes.length
+    ? notes.map((note) => `
+        <div class="arabic-annotator-note-row" data-note-id="${escapeHtml(note.id)}">
+          <div class="arabic-annotator-note-text">${escapeHtml(note.text)}</div>
+          <div class="arabic-annotator-note-actions">
+            <button type="button" class="arabic-annotator-edit-note" data-note-id="${escapeHtml(note.id)}">تعديل</button>
+            <button type="button" class="arabic-annotator-delete-note" data-note-id="${escapeHtml(note.id)}">حذف</button>
+          </div>
+        </div>
+      `).join("")
+    : '<div class="arabic-annotator-empty">لا توجد ملاحظات لهذه الجملة</div>';
 
   card.innerHTML = `
-    <div style="font-weight:bold;margin-bottom:4px">التظليل المحفوظ</div>
+    <div class="arabic-annotator-card-title">الجملة المحفوظة</div>
     ${entitiesHtml}
-    ${notesHtml}
-    <div style="margin-top:8px;display:flex;justify-content:flex-end">
-      <button id="arabic-annotator-delete-ann" style="background:#e53935;color:#fff;border:none;padding:3px 8px;border-radius:4px;cursor:pointer">حذف</button>
+    <div class="arabic-annotator-section">
+      <div class="arabic-annotator-section-title">الملاحظات</div>
+      <div class="arabic-annotator-notes">${notesHtml}</div>
+      <div id="arabic-annotator-note-form"></div>
+      <button type="button" id="arabic-annotator-add-note" class="arabic-annotator-primary-button">＋ إضافة ملاحظة</button>
+    </div>
+    <div class="arabic-annotator-card-footer">
+      <button type="button" id="arabic-annotator-delete-ann" class="arabic-annotator-danger-button">حذف الجملة</button>
     </div>
   `;
 
-  document.body.appendChild(card);
-  card.addEventListener("mouseleave", removeHoverCard);
-  mark.addEventListener("mouseleave", () => {
-    hoverCardTimeout = setTimeout(() => {
-      if (!card.matches(":hover")) removeHoverCard();
-    }, 300);
+  card.querySelectorAll(".arabic-annotator-edit-note").forEach((button) => {
+    button.addEventListener("click", () => {
+      const note = notes.find((item) => String(item.id) === String(button.dataset.noteId));
+      if (note) showNoteForm(card, annotation, "edit", note);
+    });
+  });
+
+  card.querySelectorAll(".arabic-annotator-delete-note").forEach((button) => {
+    button.addEventListener("click", async () => {
+      const response = await send({ type: "DELETE_NOTE", id: Number(button.dataset.noteId) });
+      if (!response.ok) {
+        console.error("Failed to delete note:", response.error);
+        return;
+      }
+      await refreshHoverCard(annotation.id);
+    });
+  });
+
+  card.querySelector("#arabic-annotator-add-note").addEventListener("click", () => {
+    showNoteForm(card, annotation, "add");
   });
 
   card.querySelector("#arabic-annotator-delete-ann").addEventListener("click", async () => {
-    const deleteResponse = await send({ type: "DELETE_ANNOTATION", id: annotationId });
-    if (deleteResponse.ok && deleteResponse.data?.deleted) {
-      mark.replaceWith(document.createTextNode(mark.textContent));
-      removeHoverCard();
+    const response = await send({ type: "DELETE_ANNOTATION", id: annotation.id });
+    if (!response.ok) {
+      console.error("Failed to delete annotation:", response.error);
+      return;
     }
+    if (activeHoverMark) activeHoverMark.replaceWith(document.createTextNode(activeHoverMark.textContent));
+    activeHoverMark = null;
+    removeHoverCard();
   });
+}
+
+function showNoteForm(card, annotation, mode, note = null) {
+  const formHost = card.querySelector("#arabic-annotator-note-form");
+  if (!formHost) return;
+
+  const isEdit = mode === "edit";
+  formHost.innerHTML = `
+    <div class="arabic-annotator-note-form">
+      <textarea class="arabic-annotator-note-input" maxlength="2000" placeholder="اكتب الملاحظة...">${isEdit ? escapeHtml(note.text) : ""}</textarea>
+      <div class="arabic-annotator-form-actions">
+        <button type="button" class="arabic-annotator-cancel-note">إلغاء</button>
+        <button type="button" class="arabic-annotator-save-note">${isEdit ? "حفظ التعديل" : "حفظ الملاحظة"}</button>
+      </div>
+    </div>
+  `;
+
+  const input = formHost.querySelector(".arabic-annotator-note-input");
+  input.focus();
+
+  formHost.querySelector(".arabic-annotator-cancel-note").addEventListener("click", () => {
+    formHost.innerHTML = "";
+  });
+
+  formHost.querySelector(".arabic-annotator-save-note").addEventListener("click", async () => {
+    const text = input.value.trim();
+    if (!text) return;
+
+    const response = isEdit
+      ? await send({ type: "UPDATE_NOTE", id: Number(note.id), text })
+      : await send({ type: "ADD_NOTE", annotation_id: annotation.id, text });
+
+    if (!response.ok) {
+      console.error(`Failed to ${isEdit ? "update" : "add"} note:`, response.error);
+      return;
+    }
+
+    await refreshHoverCard(annotation.id);
+  });
+}
+
+async function refreshHoverCard(annotationId) {
+  const response = await send({ type: "GET_ANNOTATIONS", page_url: cleanPageUrl() });
+  if (!response.ok || !Array.isArray(response.data)) return;
+  const annotation = response.data.find((item) => item.id === annotationId);
+  const card = document.getElementById("arabic-annotator-hover-card");
+  if (annotation && card) renderHoverCard(card, annotation);
 }
 
 function removeHoverCard() {

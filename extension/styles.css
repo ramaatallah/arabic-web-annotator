@@ -1,4 +1,134 @@
-mark.annotator-highlight {
+mark.arabic-annotator-highlight {
   background: #ffe066;
   color: inherit;
+  padding: 2px 0;
+  border-radius: 3px;
+  cursor: pointer;
+}
+
+.arabic-annotator-hover-card {
+  position: absolute;
+  z-index: 2147483647;
+  width: 320px;
+  max-width: calc(100vw - 24px);
+  box-sizing: border-box;
+  padding: 12px;
+  background: #fff;
+  color: #222;
+  border: 1px solid #ddd;
+  border-radius: 10px;
+  box-shadow: 0 5px 18px rgba(0, 0, 0, .18);
+  font-family: Arial, sans-serif;
+  font-size: 13px;
+  direction: rtl;
+}
+
+.arabic-annotator-card-title {
+  font-weight: 700;
+  font-size: 14px;
+  margin-bottom: 10px;
+}
+
+.arabic-annotator-section {
+  border-top: 1px solid #eee;
+  padding-top: 9px;
+  margin-top: 9px;
+}
+
+.arabic-annotator-section-title {
+  font-weight: 700;
+  margin-bottom: 7px;
+}
+
+.arabic-annotator-entities {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.arabic-annotator-entity {
+  display: inline-flex;
+  gap: 5px;
+  align-items: center;
+  padding: 4px 7px;
+  border-radius: 6px;
+  background: #eef5ff;
+  border: 1px solid #d7e6ff;
+}
+
+.arabic-annotator-entity small {
+  color: #35649b;
+}
+
+.arabic-annotator-empty {
+  color: #777;
+  font-size: 12px;
+}
+
+.arabic-annotator-note-row {
+  padding: 7px 0;
+  border-bottom: 1px solid #f0f0f0;
+}
+
+.arabic-annotator-note-text {
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  line-height: 1.45;
+}
+
+.arabic-annotator-note-actions,
+.arabic-annotator-form-actions,
+.arabic-annotator-card-footer {
+  display: flex;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.arabic-annotator-note-actions button,
+.arabic-annotator-form-actions button,
+.arabic-annotator-card-footer button,
+.arabic-annotator-primary-button {
+  border: 0;
+  border-radius: 5px;
+  padding: 5px 8px;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.arabic-annotator-edit-note,
+.arabic-annotator-primary-button,
+.arabic-annotator-save-note {
+  background: #1976d2;
+  color: #fff;
+}
+
+.arabic-annotator-delete-note,
+.arabic-annotator-danger-button {
+  background: #e53935;
+  color: #fff;
+}
+
+.arabic-annotator-cancel-note {
+  background: #f1f1f1;
+  color: #333;
+}
+
+.arabic-annotator-card-footer {
+  justify-content: flex-start;
+}
+
+.arabic-annotator-note-form {
+  margin-top: 8px;
+}
+
+.arabic-annotator-note-input {
+  width: 100%;
+  min-height: 65px;
+  box-sizing: border-box;
+  padding: 7px;
+  border: 1px solid #ccc;
+  border-radius: 6px;
+  resize: vertical;
+  font: inherit;
+  direction: rtl;
 }
