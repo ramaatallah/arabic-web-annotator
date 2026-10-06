@@ -1,451 +1,425 @@
-// extension/content.js - Workstream A: Content Script Implementation
+let enabled = true;
+let currentSelectionRange = null;
+let hoverCardTimeout = null;
 
-// 1. Mock Configuration and Central Communication Function
-const MOCK = {
-  ANALYZE_TEXT: true,
-  SAVE_ANNOTATION: true,
-  GET_ANNOTATIONS: true,
-  ADD_NOTE: true,
-  UPDATE_NOTE: true,
-  DELETE_NOTE: true,
-  DELETE_ANNOTATION: true
-};
+function cleanPageUrl() {
+  const url = new URL(window.location.href);
+  url.hash = "";
 
-async function send(message) {
-  const type = message.type;
-
-  if (MOCK[type]) {
-    return handleMockResponse(message);
+  for (const key of [...url.searchParams.keys()]) {
+    if (key.toLowerCase().startsWith("utm_")) {
+      url.searchParams.delete(key);
+    }
   }
 
+  return url.toString();
+}
+
+function send(message) {
   return new Promise((resolve) => {
     chrome.runtime.sendMessage(message, (response) => {
+      if (chrome.runtime.lastError) {
+        resolve({ ok: false, error: chrome.runtime.lastError.message });
+        return;
+      }
       resolve(response || { ok: false, error: "No response from background script" });
     });
   });
 }
 
-function handleMockResponse(message) {
-  return new Promise((resolve) => {
-    switch (message.type) {
-      case 'ANALYZE_TEXT': {
-        const text = message.text || '';
-        const mockEntities = [];
-        if (text.includes('أحمد')) {
-          const start = text.indexOf('أحمد');
-          mockEntities.push({ text: 'أحمد', type: 'person', start: start, end: start + 4 });
-        }
-        if (text.includes('جامعة النجاح')) {
-          const start = text.indexOf('جامعة النجاح');
-          mockEntities.push({ text: 'جامعة النجاح', type: 'university', start: start, end: start + 12 });
-        }
-        if (text.includes('نابلس')) {
-          const start = text.indexOf('نابلس');
-          mockEntities.push({ text: 'نابلس', type: 'city', start: start, end: start + 5 });
-        }
-        resolve({ ok: true, data: mockEntities });
-        break;
-      }
-
-      case 'SAVE_ANNOTATION': {
-        chrome.storage.local.get({ mock_annotations: [] }, (result) => {
-          const annotations = result.mock_annotations;
-          const newAnnotation = {
-            id: 'ann_' + Date.now(),
-            user_id: null,
-            page_url: message.page_url,
-            selected_text: message.selected_text,
-            prefix: message.prefix || '',
-            suffix: message.suffix || '',
-            start_offset: message.start_offset || 0,
-            end_offset: message.end_offset || 0,
-            created_at: new Date().toISOString(),
-            entities: message.entities || [],
-            notes: message.note ? [{ id: 'note_' + Date.now(), text: message.note, created_at: new Date().toISOString() }] : []
-          };
-          annotations.push(newAnnotation);
-          chrome.storage.local.set({ mock_annotations: annotations }, () => {
-            resolve({ ok: true, data: newAnnotation });
-          });
-        });
-        break;
-      }
-
-      case 'GET_ANNOTATIONS': {
-        chrome.storage.local.get({ mock_annotations: [] }, (result) => {
-          const pageAnnotations = result.mock_annotations.filter(ann => ann.page_url === message.url);
-          resolve({ ok: true, data: pageAnnotations });
-        });
-        break;
-      }
-
-      case 'ADD_NOTE': {
-        chrome.storage.local.get({ mock_annotations: [] }, (result) => {
-          const annotations = result.mock_annotations;
-          const ann = annotations.find(a => a.id === message.annotation_id);
-          if (ann) {
-            const newNote = { id: 'note_' + Date.now(), text: message.text, created_at: new Date().toISOString() };
-            ann.notes = ann.notes || [];
-            ann.notes.push(newNote);
-            chrome.storage.local.set({ mock_annotations: annotations }, () => {
-              resolve({ ok: true, data: newNote });
-            });
-          } else {
-            resolve({ ok: false, error: "Annotation not found" });
-          }
-        });
-        break;
-      }
-
-      case 'UPDATE_NOTE': {
-        chrome.storage.local.get({ mock_annotations: [] }, (result) => {
-          const annotations = result.mock_annotations;
-          let updatedNote = null;
-          annotations.forEach(ann => {
-            if (ann.notes) {
-              const note = ann.notes.find(n => n.id === message.id);
-              if (note) {
-                note.text = message.text;
-                updatedNote = note;
-              }
-            }
-          });
-          if (updatedNote) {
-            chrome.storage.local.set({ mock_annotations: annotations }, () => {
-              resolve({ ok: true, data: updatedNote });
-            });
-          } else {
-            resolve({ ok: false, error: "Note not found" });
-          }
-        });
-        break;
-      }
-
-      case 'DELETE_NOTE': {
-        chrome.storage.local.get({ mock_annotations: [] }, (result) => {
-          const annotations = result.mock_annotations;
-          annotations.forEach(ann => {
-            if (ann.notes) {
-              ann.notes = ann.notes.filter(n => n.id !== message.id);
-            }
-          });
-          chrome.storage.local.set({ mock_annotations: annotations }, () => {
-            resolve({ ok: true, data: { deleted: true } });
-          });
-        });
-        break;
-      }
-
-      case 'DELETE_ANNOTATION': {
-        chrome.storage.local.get({ mock_annotations: [] }, (result) => {
-          const annotations = result.mock_annotations.filter(a => a.id !== message.id);
-          chrome.storage.local.set({ mock_annotations: annotations }, () => {
-            resolve({ ok: true, data: { deleted: true } });
-          });
-        });
-        break;
-      }
-
-      default:
-        resolve({ ok: false, error: "Unknown message type" });
-    }
+function refreshEnabledState() {
+  chrome.storage.local.get(["enabled"], (result) => {
+    enabled = result.enabled !== false;
   });
 }
 
-// 2. Selection Event Handling & Early Un-highlighting
-let currentSelectionRange = null;
+chrome.storage.onChanged.addListener((changes, areaName) => {
+  if (areaName === "local" && changes.enabled) {
+    enabled = changes.enabled.newValue !== false;
+  }
+});
 
-document.addEventListener('mouseup', handleTextSelection);
+function isVisibleTextNode(node) {
+  if (!node.parentElement) return false;
+  if (node.parentElement.closest("script, style, noscript, template")) return false;
 
-function handleTextSelection(e) {
-  // Ignore clicks inside extension popups or controls if any
-  if (e.target.closest('#arabic-annotator-box') || e.target.closest('#arabic-annotator-hover-card')) {
-    return;
+  let element = node.parentElement;
+  while (element && element !== document.body) {
+    const style = window.getComputedStyle(element);
+    if (style.display === "none" || style.visibility === "hidden") return false;
+    element = element.parentElement;
   }
 
+  return true;
+}
+
+function getPageTextNodes() {
+  const nodes = [];
+  const walker = document.createTreeWalker(
+    document.body,
+    NodeFilter.SHOW_TEXT,
+    {
+      acceptNode(node) {
+        return isVisibleTextNode(node) && node.nodeValue
+          ? NodeFilter.FILTER_ACCEPT
+          : NodeFilter.FILTER_REJECT;
+      }
+    }
+  );
+
+  let node;
+  while ((node = walker.nextNode())) nodes.push(node);
+  return nodes;
+}
+
+function getPageText() {
+  return getPageTextNodes().map((node) => node.nodeValue).join("");
+}
+
+function pointToPageOffset(container, offset, textNodes) {
+  const point = document.createRange();
+  point.setStart(container, offset);
+  point.collapse(true);
+
+  let total = 0;
+
+  for (const node of textNodes) {
+    if (node === container) {
+      return total + offset;
+    }
+
+    const nodeRange = document.createRange();
+    nodeRange.selectNodeContents(node);
+
+    const pointVsNodeEnd = point.compareBoundaryPoints(Range.START_TO_END, nodeRange);
+    if (pointVsNodeEnd >= 0) {
+      total += node.nodeValue.length;
+      continue;
+    }
+
+    const pointVsNodeStart = point.compareBoundaryPoints(Range.START_TO_START, nodeRange);
+    if (pointVsNodeStart >= 0) {
+      const inside = document.createRange();
+      inside.setStart(node, 0);
+      inside.setEnd(container, offset);
+      return total + inside.toString().length;
+    }
+
+    break;
+  }
+
+  return total;
+}
+
+function getRangePageOffsets(range, textNodes) {
+  return {
+    start: pointToPageOffset(range.startContainer, range.startOffset, textNodes),
+    end: pointToPageOffset(range.endContainer, range.endOffset, textNodes)
+  };
+}
+
+function getSurroundingContext(pageText, start, end, length = 30) {
+  return {
+    prefix: pageText.slice(Math.max(0, start - length), start),
+    suffix: pageText.slice(end, Math.min(pageText.length, end + length))
+  };
+}
+
+function escapeHtml(value) {
+  return String(value)
+    .replaceAll("&", "&amp;")
+    .replaceAll("<", "&lt;")
+    .replaceAll(">", "&gt;")
+    .replaceAll('"', "&quot;")
+    .replaceAll("'", "&#039;");
+}
+
+document.addEventListener("mousedown", (event) => {
+  const box = document.getElementById("arabic-annotator-box");
+  const card = document.getElementById("arabic-annotator-hover-card");
+  if ((box && !box.contains(event.target)) || (card && !card.contains(event.target))) {
+    removeAnnotatorBox();
+    removeHoverCard();
+  }
+});
+
+document.addEventListener("keydown", (event) => {
+  if (event.key === "Escape") {
+    removeAnnotatorBox();
+    removeHoverCard();
+  }
+});
+
+document.addEventListener("mouseup", handleTextSelection);
+
+function handleTextSelection(event) {
+  if (!enabled) return;
+  if (event.target.closest("#arabic-annotator-box, #arabic-annotator-hover-card")) return;
+
   const selection = window.getSelection();
-  const selectedText = selection.toString().trim();
+  if (!selection || selection.rangeCount === 0) return;
 
-  if (selectedText.length > 0) {
-    const range = selection.getRangeAt(0);
-    // Store the selected range for later processing
+  const selectedText = selection.toString();
+  if (!selectedText.trim()) return;
+
+  try {
+    const range = selection.getRangeAt(0).cloneRange();
     currentSelectionRange = range.cloneRange();
-
-    // Immediately clear default blue highlighting
     selection.removeAllRanges();
-
-    // Process selection positioning and NER analysis (Step 3)
-    processSelection(selectedText, currentSelectionRange);
+    processSelection(selectedText, range);
+  } catch (error) {
+    console.error("Error handling text selection:", error);
   }
 }
 
-// 3. Positioning and Initial Entity Analysis
 async function processSelection(selectedText, range) {
-  // Get text coordinates relative to viewport
   const rect = range.getBoundingClientRect();
   const position = {
-    top: rect.bottom + window.scrollY + 8, // Position slightly below the selection
+    top: rect.bottom + window.scrollY + 8,
     left: rect.left + window.scrollX
   };
 
   try {
-    // Send request to analyze selected text for entities
-    const response = await send({ type: 'ANALYZE_TEXT', text: selectedText });
-    const entities = response.ok ? response.data : [];
+    const response = await send({ type: "ANALYZE_TEXT", text: selectedText });
+    const entities = response.ok && response.data && Array.isArray(response.data.entities)
+      ? response.data.entities
+      : [];
 
-    // Trigger UI presentation (Step 4)
-    if (typeof showAnnotatorBox === 'function') {
-      showAnnotatorBox(selectedText, range, position, entities);
-    } else {
-      console.log('Selection processed:', { selectedText, position, entities });
-    }
-  } catch (err) {
-    console.error('Error analyzing text:', err);
+    showAnnotatorBox(selectedText, range, position, entities);
+  } catch (error) {
+    console.error("Error analyzing text:", error);
+    showAnnotatorBox(selectedText, range, position, []);
   }
 }
 
-// 4. Floating Action Box UI Construction
 function showAnnotatorBox(selectedText, range, position, entities = []) {
   removeAnnotatorBox();
 
-  const box = document.createElement('div');
-  box.id = 'arabic-annotator-box';
-  box.style.position = 'absolute';
-  box.style.top = `${position.top}px`;
-  box.style.left = `${position.left}px`;
-  box.style.zIndex = '2147483647';
-  box.style.backgroundColor = '#ffffff';
-  box.style.border = '1px solid #e0e0e0';
-  box.style.borderRadius = '8px';
-  box.style.boxShadow = '0 4px 12px rgba(0,0,0,0.15)';
-  box.style.padding = '12px';
-  box.style.fontFamily = 'sans-serif';
-  box.style.direction = 'rtl';
-  box.style.minWidth = '260px';
+  const box = document.createElement("div");
+  box.id = "arabic-annotator-box";
+  box.style.cssText = `position:absolute;top:${position.top}px;left:${position.left}px;z-index:2147483647;background:#fff;border:1px solid #e0e0e0;border-radius:8px;box-shadow:0 4px 12px rgba(0,0,0,.15);padding:12px;font-family:sans-serif;direction:rtl;min-width:260px;`;
 
-  let entitiesHtml = '';
-  if (entities.length > 0) {
-    entitiesHtml = `
-      <div style="margin-bottom: 8px; font-size: 12px; color: #555;">
-        <strong>الكيانات المكتشفة:</strong>
-        <div style="display: flex; flex-wrap: wrap; gap: 4px; margin-top: 4px;">
-          ${entities.map(e => `<span style="background: #e3f2fd; color: #1565c0; padding: 2px 6px; border-radius: 4px; font-size: 11px;">${e.text} (${e.type})</span>`).join('')}
-        </div>
-      </div>
-    `;
-  }
+  const entitiesHtml = entities.length
+    ? `<div style="margin-bottom:8px;font-size:12px;color:#555"><strong>الكيانات المكتشفة:</strong><div style="display:flex;flex-wrap:wrap;gap:4px;margin-top:4px">${entities.map((entity) => `<span style="background:#e3f2fd;color:#1565c0;padding:2px 6px;border-radius:4px;font-size:11px">${escapeHtml(entity.text)} (${escapeHtml(entity.type)})</span>`).join("")}</div></div>`
+    : "";
 
   box.innerHTML = `
     ${entitiesHtml}
-    <textarea id="arabic-annotator-note" placeholder="أضف ملاحظة (اختياري)..." style="width: 100%; height: 50px; margin-bottom: 8px; padding: 6px; border: 1px solid #ccc; border-radius: 4px; font-size: 12px; resize: none; box-sizing: border-box;"></textarea>
-    <div style="display: flex; justify-content: flex-end; gap: 6px;">
-      <button id="arabic-annotator-cancel" style="padding: 4px 10px; background: #f5f5f5; border: 1px solid #ccc; border-radius: 4px; cursor: pointer; font-size: 12px;">إلغاء</button>
-      <button id="arabic-annotator-save" style="padding: 4px 10px; background: #1976d2; color: #fff; border: none; border-radius: 4px; cursor: pointer; font-size: 12px;">حفظ</button>
+    <textarea id="arabic-annotator-note" placeholder="أضف ملاحظة (اختياري)..." style="width:100%;height:50px;margin-bottom:8px;padding:6px;border:1px solid #ccc;border-radius:4px;font-size:12px;resize:none;box-sizing:border-box"></textarea>
+    <div style="display:flex;justify-content:flex-end;gap:6px">
+      <button id="arabic-annotator-cancel" style="padding:4px 10px;background:#f5f5f5;border:1px solid #ccc;border-radius:4px;cursor:pointer;font-size:12px">إلغاء</button>
+      <button id="arabic-annotator-save" style="padding:4px 10px;background:#1976d2;color:#fff;border:none;border-radius:4px;cursor:pointer;font-size:12px">حفظ</button>
     </div>
   `;
 
   document.body.appendChild(box);
-
-  document.getElementById('arabic-annotator-cancel').addEventListener('click', removeAnnotatorBox);
-  document.getElementById('arabic-annotator-save').addEventListener('click', () => {
-    const noteText = document.getElementById('arabic-annotator-note').value;
-    if (typeof handleSaveAnnotation === 'function') {
-      handleSaveAnnotation(selectedText, range, entities, noteText);
-    } else {
-      console.log('Save triggered:', { selectedText, noteText, entities });
-      removeAnnotatorBox();
-    }
+  box.querySelector("#arabic-annotator-cancel").addEventListener("click", removeAnnotatorBox);
+  box.querySelector("#arabic-annotator-save").addEventListener("click", () => {
+    const noteText = box.querySelector("#arabic-annotator-note").value.trim();
+    handleSaveAnnotation(selectedText, range, entities, noteText);
   });
 }
 
 function removeAnnotatorBox() {
-  const existing = document.getElementById('arabic-annotator-box');
-  if (existing) {
-    existing.remove();
-  }
+  document.getElementById("arabic-annotator-box")?.remove();
 }
 
-// 5. Annotation Creation & Persistent Highlighting
-async function handleSaveAnnotation(selectedText, range, entities = [], noteText = '') {
-  // Extract surrounding context (prefix and suffix) for robust anchor matching
-  const context = getSurroundingContext(range);
-
-  const annotationPayload = {
-    type: 'SAVE_ANNOTATION',
-    page_url: window.location.href,
-    selected_text: selectedText,
-    prefix: context.prefix,
-    suffix: context.suffix,
-    start_offset: range.startOffset,
-    end_offset: range.endOffset,
-    entities: entities,
-    note: noteText.trim()
-  };
-
+async function handleSaveAnnotation(selectedText, range, entities, noteText) {
   try {
-    const response = await send(annotationPayload);
-    if (response.ok) {
-      // Highlight the range in DOM
-      applyHighlightToRange(range, response.data);
-      removeAnnotatorBox();
-    } else {
-      console.error('Failed to save annotation:', response.error);
+    const textNodes = getPageTextNodes();
+    const pageText = textNodes.map((node) => node.nodeValue).join("");
+    const offsets = getRangePageOffsets(range, textNodes);
+    const selectedAtOffsets = pageText.slice(offsets.start, offsets.end);
+
+    if (selectedAtOffsets !== selectedText) {
+      console.error("Selected text does not match page offsets.");
+      return;
     }
-  } catch (err) {
-    console.error('Error saving annotation:', err);
+
+    const context = getSurroundingContext(pageText, offsets.start, offsets.end);
+    const annotation = {
+      id: `anno_${Date.now()}`,
+      user_id: null,
+      page_url: cleanPageUrl(),
+      selected_text: selectedText,
+      prefix: context.prefix,
+      suffix: context.suffix,
+      start_offset: offsets.start,
+      end_offset: offsets.end,
+      created_at: new Date().toISOString(),
+      entities,
+      note: noteText || null
+    };
+
+    const response = await send({ type: "SAVE_ANNOTATION", annotation });
+    if (!response.ok) {
+      console.error("Failed to save annotation:", response.error);
+      return;
+    }
+
+    applyHighlightToRange(range, response.data);
+    removeAnnotatorBox();
+  } catch (error) {
+    console.error("Error saving annotation:", error);
   }
-}
-
-function getSurroundingContext(range, length = 30) {
-  const container = range.commonAncestorContainer;
-  const fullText = container.textContent || '';
-  
-  const start = range.startOffset;
-  const end = range.endOffset;
-
-  const prefix = fullText.substring(Math.max(0, start - length), start);
-  const suffix = fullText.substring(end, Math.min(fullText.length, end + length));
-
-  return { prefix, suffix };
 }
 
 function applyHighlightToRange(range, annotationData) {
-  const mark = document.createElement('mark');
-  mark.className = 'arabic-annotator-highlight';
-  mark.dataset.annotationId = annotationData.id;
-  mark.style.backgroundColor = '#fff59d';
-  mark.style.color = 'inherit';
-  mark.style.padding = '2px 0';
-  mark.style.borderRadius = '3px';
-  mark.style.cursor = 'pointer';
-
   try {
+    const mark = document.createElement("mark");
+    mark.className = "arabic-annotator-highlight";
+    mark.dataset.annotationId = annotationData.id;
+    mark.style.backgroundColor = "#fff59d";
+    mark.style.color = "inherit";
+    mark.style.padding = "2px 0";
+    mark.style.borderRadius = "3px";
+    mark.style.cursor = "pointer";
     range.surroundContents(mark);
-  } catch (e) {
-    // Fallback if range spans multiple node boundaries
-    console.warn('Direct surroundContents failed, wrapping text nodes:', e);
+  } catch (error) {
+    console.warn("Could not apply highlight to selected range:", error);
   }
 }
 
-// 6. Hover Card Interaction
-document.addEventListener('mouseover', (e) => {
-  const mark = e.target.closest('.arabic-annotator-highlight');
-  if (mark) {
-    showHoverCard(mark);
-  }
+document.addEventListener("mouseover", (event) => {
+  const mark = event.target.closest(".arabic-annotator-highlight");
+  if (mark) showHoverCard(mark);
 });
 
-let hoverCardTimeout = null;
-
-function showHoverCard(mark) {
+async function showHoverCard(mark) {
   clearTimeout(hoverCardTimeout);
   removeHoverCard();
 
   const annotationId = mark.dataset.annotationId;
+  const response = await send({ type: "GET_ANNOTATIONS", page_url: cleanPageUrl() });
+  if (!response.ok || !Array.isArray(response.data)) return;
 
-  chrome.storage.local.get({ mock_annotations: [] }, (result) => {
-    const annotation = result.mock_annotations.find(a => a.id === annotationId);
-    if (!annotation) return;
+  const annotation = response.data.find((item) => item.id === annotationId);
+  if (!annotation) return;
 
-    const rect = mark.getBoundingClientRect();
-    const card = document.createElement('div');
-    card.id = 'arabic-annotator-hover-card';
-    card.style.position = 'absolute';
-    card.style.top = `${rect.bottom + window.scrollY + 6}px`;
-    card.style.left = `${rect.left + window.scrollX}px`;
-    card.style.zIndex = '2147483647';
-    card.style.backgroundColor = '#ffffff';
-    card.style.border = '1px solid #ddd';
-    card.style.borderRadius = '6px';
-    card.style.boxShadow = '0 2px 8px rgba(0,0,0,0.15)';
-    card.style.padding = '10px';
-    card.style.fontSize = '12px';
-    card.style.direction = 'rtl';
-    card.style.minWidth = '220px';
+  const rect = mark.getBoundingClientRect();
+  const card = document.createElement("div");
+  card.id = "arabic-annotator-hover-card";
+  card.style.cssText = `position:absolute;top:${rect.bottom + window.scrollY + 6}px;left:${rect.left + window.scrollX}px;z-index:2147483647;background:#fff;border:1px solid #ddd;border-radius:6px;box-shadow:0 2px 8px rgba(0,0,0,.15);padding:10px;font-size:12px;direction:rtl;min-width:220px`;
 
-    let notesHtml = '';
-    if (annotation.notes && annotation.notes.length > 0) {
-      notesHtml = annotation.notes.map(n => `<div style="background: #f9f9f9; padding: 4px 6px; border-radius: 4px; margin-top: 4px;">${n.text}</div>`).join('');
-    }
+  const entitiesHtml = (annotation.entities || []).length
+    ? `<div style="margin-bottom:6px"><strong>الكلمات:</strong> ${(annotation.entities || []).map((entity) => `${escapeHtml(entity.text)} (${escapeHtml(entity.type)})`).join("، ")}</div>`
+    : "";
+  const notesHtml = (annotation.notes || []).length
+    ? (annotation.notes || []).map((note) => `<div style="background:#f9f9f9;padding:4px 6px;border-radius:4px;margin-top:4px">${escapeHtml(note.text)}</div>`).join("")
+    : '<div style="color:#777">لا توجد ملاحظات</div>';
 
-    card.innerHTML = `
-      <div style="font-weight: bold; margin-bottom: 4px;">التظليل المحفوظ</div>
-      ${notesHtml}
-      <div style="margin-top: 8px; display: flex; gap: 4px; justify-content: flex-end;">
-        <button id="arabic-annotator-delete-ann" style="background: #e53935; color: white; border: none; padding: 3px 8px; border-radius: 4px; cursor: pointer;">حذف</button>
-      </div>
-    `;
+  card.innerHTML = `
+    <div style="font-weight:bold;margin-bottom:4px">التظليل المحفوظ</div>
+    ${entitiesHtml}
+    ${notesHtml}
+    <div style="margin-top:8px;display:flex;justify-content:flex-end">
+      <button id="arabic-annotator-delete-ann" style="background:#e53935;color:#fff;border:none;padding:3px 8px;border-radius:4px;cursor:pointer">حذف</button>
+    </div>
+  `;
 
-    document.body.appendChild(card);
+  document.body.appendChild(card);
+  card.addEventListener("mouseleave", removeHoverCard);
+  mark.addEventListener("mouseleave", () => {
+    hoverCardTimeout = setTimeout(() => {
+      if (!card.matches(":hover")) removeHoverCard();
+    }, 300);
+  });
 
-    card.addEventListener('mouseleave', () => removeHoverCard());
-    mark.addEventListener('mouseleave', () => {
-      hoverCardTimeout = setTimeout(() => {
-        if (!card.matches(':hover')) removeHoverCard();
-      }, 300);
-    });
-
-    const deleteBtn = card.querySelector('#arabic-annotator-delete-ann');
-    if (deleteBtn) {
-      deleteBtn.addEventListener('click', async () => {
-        await send({ type: 'DELETE_ANNOTATION', id: annotationId });
-        mark.replaceWith(document.createTextNode(mark.textContent));
-        removeHoverCard();
-      });
+  card.querySelector("#arabic-annotator-delete-ann").addEventListener("click", async () => {
+    const deleteResponse = await send({ type: "DELETE_ANNOTATION", id: annotationId });
+    if (deleteResponse.ok && deleteResponse.data?.deleted) {
+      mark.replaceWith(document.createTextNode(mark.textContent));
+      removeHoverCard();
     }
   });
 }
 
 function removeHoverCard() {
-  const card = document.getElementById('arabic-annotator-hover-card');
-  if (card) card.remove();
+  document.getElementById("arabic-annotator-hover-card")?.remove();
 }
 
-// 7. On-load Annotation Restoration
-document.addEventListener('DOMContentLoaded', restorePageAnnotations);
+function findRangeForOffsets(textNodes, startOffset, endOffset) {
+  let total = 0;
+  let startPoint = null;
+  let endPoint = null;
 
-if (document.readyState === 'interactive' || document.readyState === 'complete') {
-  restorePageAnnotations();
-}
+  for (const node of textNodes) {
+    const length = node.nodeValue.length;
+    const nextTotal = total + length;
 
-async function restorePageAnnotations() {
-  try {
-    const response = await send({ type: 'GET_ANNOTATIONS', url: window.location.href });
-    if (response.ok && Array.isArray(response.data)) {
-      response.data.forEach(annotation => {
-        restoreSingleAnnotation(annotation);
-      });
+    if (startPoint === null && startOffset >= total && startOffset <= nextTotal) {
+      startPoint = { node, offset: startOffset - total };
     }
-  } catch (err) {
-    console.error('Error restoring annotations:', err);
+    if (endPoint === null && endOffset >= total && endOffset <= nextTotal) {
+      endPoint = { node, offset: endOffset - total };
+      if (startPoint) break;
+    }
+
+    total = nextTotal;
+  }
+
+  if (!startPoint || !endPoint) return null;
+
+  const range = document.createRange();
+  range.setStart(startPoint.node, startPoint.offset);
+  range.setEnd(endPoint.node, endPoint.offset);
+  return range;
+}
+
+function findFallbackRange(annotation, pageText, textNodes) {
+  let from = 0;
+  while (true) {
+    const index = pageText.indexOf(annotation.selected_text, from);
+    if (index === -1) return null;
+
+    const prefixMatches = pageText.slice(Math.max(0, index - annotation.prefix.length), index) === annotation.prefix;
+    const suffixMatches = pageText.slice(index + annotation.selected_text.length, index + annotation.selected_text.length + annotation.suffix.length) === annotation.suffix;
+
+    if (prefixMatches && suffixMatches) {
+      return findRangeForOffsets(textNodes, index, index + annotation.selected_text.length);
+    }
+
+    from = index + 1;
   }
 }
 
 function restoreSingleAnnotation(annotation) {
-  const { id, selected_text, prefix, suffix } = annotation;
-  
-  const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT, null, false);
-  let node;
+  const textNodes = getPageTextNodes();
+  const pageText = textNodes.map((node) => node.nodeValue).join("");
+  let range = null;
 
-  while ((node = walker.nextNode())) {
-    const text = node.nodeValue;
-    const index = text.indexOf(selected_text);
-
-    if (index !== -1) {
-      const nodePrefix = text.substring(Math.max(0, index - prefix.length), index);
-      const nodeSuffix = text.substring(index + selected_text.length, index + selected_text.length + suffix.length);
-
-      const prefixMatches = !prefix || nodePrefix.endsWith(prefix) || prefix.endsWith(nodePrefix);
-      const suffixMatches = !suffix || nodeSuffix.startsWith(suffix) || suffix.startsWith(nodeSuffix);
-
-      if (prefixMatches || suffixMatches) {
-        const range = document.createRange();
-        range.setStart(node, index);
-        range.setEnd(node, index + selected_text.length);
-
-        applyHighlightToRange(range, { id });
-        break;
-      }
-    }
+  if (
+    Number.isInteger(annotation.start_offset) &&
+    Number.isInteger(annotation.end_offset) &&
+    pageText.slice(annotation.start_offset, annotation.end_offset) === annotation.selected_text
+  ) {
+    range = findRangeForOffsets(textNodes, annotation.start_offset, annotation.end_offset);
   }
+
+  if (!range) {
+    range = findFallbackRange(annotation, pageText, textNodes);
+  }
+
+  if (range) applyHighlightToRange(range, annotation);
+}
+
+async function restorePageAnnotations() {
+  if (!enabled) return;
+
+  try {
+    const response = await send({ type: "GET_ANNOTATIONS", page_url: cleanPageUrl() });
+    if (response.ok && Array.isArray(response.data)) {
+      response.data.forEach(restoreSingleAnnotation);
+    }
+  } catch (error) {
+    console.error("Error restoring annotations:", error);
+  }
+}
+
+refreshEnabledState();
+
+if (document.readyState === "loading") {
+  document.addEventListener("DOMContentLoaded", restorePageAnnotations, { once: true });
+} else {
+  restorePageAnnotations();
 }

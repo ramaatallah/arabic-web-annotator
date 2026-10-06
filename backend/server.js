@@ -4,254 +4,273 @@ const db = require('./db');
 
 const app = express();
 const PORT = 5000;
+const VALID_ENTITY_TYPES = new Set([
+  'person',
+  'city',
+  'country',
+  'university',
+  'organization'
+]);
 
 app.use(cors());
 app.use(express.json());
 
-// Step 7: Save new annotation with entities and optional note
-app.post('/annotations', (req, res) => {
-  const { id, user_id, page_url, selected_text, prefix, suffix, start_offset, end_offset, entities, note } = req.body;
+function run(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.run(sql, params, function onRun(error) {
+      if (error) reject(error);
+      else resolve({ lastID: this.lastID, changes: this.changes });
+    });
+  });
+}
 
-  if (!selected_text || typeof selected_text !== 'string' || selected_text.trim() === '') {
-    return res.status(400).json({ ok: false, error: 'selected_text is required and cannot be empty' });
-  }
+function get(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.get(sql, params, (error, row) => {
+      if (error) reject(error);
+      else resolve(row);
+    });
+  });
+}
 
-  const validTypes = ['person', 'city', 'country', 'university', 'organization'];
+function all(sql, params = []) {
+  return new Promise((resolve, reject) => {
+    db.all(sql, params, (error, rows) => {
+      if (error) reject(error);
+      else resolve(rows);
+    });
+  });
+}
 
-  if (entities && Array.isArray(entities)) {
-    for (const entity of entities) {
-      if (!validTypes.includes(entity.type)) {
-        return res.status(400).json({ ok: false, error: `Invalid entity type: ${entity.type}` });
-      }
-      if (typeof entity.start !== 'number' || typeof entity.end !== 'number' || entity.start < 0 || entity.end <= entity.start || entity.end > selected_text.length) {
-        return res.status(400).json({ ok: false, error: 'Invalid entity start or end position' });
-      }
+async function getAnnotationById(id) {
+  const annotation = await get(
+    `SELECT id, user_id, page_url, selected_text, prefix, suffix,
+            start_offset, end_offset, created_at
+     FROM annotations
+     WHERE id = ?`,
+    [id]
+  );
+
+  if (!annotation) return null;
+
+  const entities = await all(
+    `SELECT id, text, type,
+            start_offset AS start,
+            end_offset AS end
+     FROM entities
+     WHERE annotation_id = ?
+     ORDER BY start_offset, id`,
+    [id]
+  );
+
+  const notes = await all(
+    `SELECT id, text, created_at
+     FROM notes
+     WHERE annotation_id = ?
+     ORDER BY id`,
+    [id]
+  );
+
+  return { ...annotation, entities, notes };
+}
+
+function validateAnnotationBody(body) {
+  const requiredStrings = ['id', 'page_url', 'selected_text', 'created_at'];
+  for (const field of requiredStrings) {
+    if (typeof body[field] !== 'string' || body[field].trim() === '') {
+      return `${field} is required and cannot be empty`;
     }
   }
 
-  const createdAt = new Date().toISOString();
-  const annotationId = id || Date.now().toString();
+  if (body.user_id !== null && body.user_id !== undefined && typeof body.user_id !== 'string') {
+    return 'user_id must be a string or null';
+  }
 
-  db.serialize(() => {
-    db.run('BEGIN TRANSACTION');
+  if (typeof body.prefix !== 'string' || typeof body.suffix !== 'string') {
+    return 'prefix and suffix are required strings';
+  }
+  if (body.prefix.length > 30 || body.suffix.length > 30) {
+    return 'prefix and suffix cannot exceed 30 characters';
+  }
 
-    const insertAnnotationSql = `
-      INSERT INTO annotations (id, user_id, page_url, selected_text, prefix, suffix, offset_start, offset_end, created_at)
-      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
-    `;
+  if (!Number.isInteger(body.start_offset) || !Number.isInteger(body.end_offset) || body.start_offset < 0 || body.end_offset <= body.start_offset) {
+    return 'Invalid annotation start_offset or end_offset';
+  }
 
-    db.run(insertAnnotationSql, [annotationId, user_id || null, page_url, selected_text, prefix || '', suffix || '', start_offset || 0, end_offset || 0, createdAt], function(err) {
-      if (err) {
-        db.run('ROLLBACK');
-        if (err.message.includes('UNIQUE constraint failed')) {
-          return res.status(409).json({ ok: false, error: 'Annotation ID already exists' });
-        }
-        return res.status(400).json({ ok: false, error: err.message });
-      }
+  if (body.end_offset - body.start_offset !== body.selected_text.length) {
+    return 'Annotation offsets do not match selected_text length';
+  }
 
-      let hasError = false;
-      if (entities && Array.isArray(entities) && entities.length > 0) {
-        const insertEntitySql = `
-          INSERT INTO entities (annotation_id, text, type, start_offset, end_offset)
-          VALUES (?, ?, ?, ?, ?)
-        `;
-        for (const entity of entities) {
-          db.run(insertEntitySql, [annotationId, entity.text, entity.type, entity.start, entity.end], (entityErr) => {
-            if (entityErr) hasError = true;
-          });
-        }
-      }
+  if (!Array.isArray(body.entities)) {
+    return 'entities must be an array';
+  }
 
-      if (note && typeof note === 'string' && note.trim() !== '') {
-        const insertNoteSql = `
-          INSERT INTO notes (annotation_id, text, created_at)
-          VALUES (?, ?, ?)
-        `;
-        db.run(insertNoteSql, [annotationId, note, createdAt], (noteErr) => {
-          if (noteErr) hasError = true;
-        });
-      }
+  let previousEnd = 0;
+  for (const entity of body.entities) {
+    if (!entity || typeof entity.text !== 'string' || entity.text === '') {
+      return 'Invalid entity text';
+    }
+    if (!VALID_ENTITY_TYPES.has(entity.type)) {
+      return `Invalid entity type: ${entity.type}`;
+    }
+    if (!Number.isInteger(entity.start) || !Number.isInteger(entity.end) || entity.start < 0 || entity.end <= entity.start || entity.end > body.selected_text.length) {
+      return 'Invalid entity start or end position';
+    }
+    if (entity.start < previousEnd) {
+      return 'Entity positions must be sorted and non-overlapping';
+    }
+    if (body.selected_text.slice(entity.start, entity.end) !== entity.text) {
+      return 'Entity text does not match its start/end position';
+    }
+    previousEnd = entity.end;
+  }
 
-      if (hasError) {
-        db.run('ROLLBACK');
-        return res.status(400).json({ ok: false, error: 'Failed to insert entities or note' });
-      }
+  if (body.note !== null && body.note !== undefined && (typeof body.note !== 'string' || body.note.trim() === '')) {
+    return 'note must be a non-empty string or null';
+  }
 
-      db.run('COMMIT', (commitErr) => {
-        if (commitErr) {
-          db.run('ROLLBACK');
-          return res.status(400).json({ ok: false, error: 'Transaction commit failed' });
-        }
+  return null;
+}
 
-        return res.status(201).json({
-          ok: true,
-          data: {
-            id: annotationId,
-            user_id: user_id || null,
-            page_url,
-            selected_text,
-            prefix: prefix || '',
-            suffix: suffix || '',
-            start_offset: start_offset || 0,
-            end_offset: end_offset || 0,
-            created_at: createdAt,
-            entities: entities || [],
-            notes: note ? [{ id: Date.now(), text: note, created_at: createdAt }] : []
-          }
-        });
-      });
-    });
-  });
+app.post('/annotations', async (req, res) => {
+  const body = req.body || {};
+  const validationError = validateAnnotationBody(body);
+  if (validationError) {
+    return res.status(400).json({ ok: false, error: validationError });
+  }
+
+  const { id, user_id = null, page_url, selected_text, prefix, suffix, start_offset, end_offset, created_at, entities, note = null } = body;
+
+  try {
+    await run('BEGIN TRANSACTION');
+
+    await run(
+      `INSERT INTO annotations
+       (id, user_id, page_url, selected_text, prefix, suffix, start_offset, end_offset, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      [id, user_id, page_url, selected_text, prefix, suffix, start_offset, end_offset, created_at]
+    );
+
+    for (const entity of entities) {
+      await run(
+        `INSERT INTO entities
+         (annotation_id, text, type, start_offset, end_offset)
+         VALUES (?, ?, ?, ?, ?)`,
+        [id, entity.text, entity.type, entity.start, entity.end]
+      );
+    }
+
+    if (typeof note === 'string' && note.trim() !== '') {
+      await run(
+        `INSERT INTO notes (annotation_id, text, created_at)
+         VALUES (?, ?, ?)`,
+        [id, note, new Date().toISOString()]
+      );
+    }
+
+    await run('COMMIT');
+    const annotation = await getAnnotationById(id);
+    return res.status(201).json({ ok: true, data: annotation });
+  } catch (error) {
+    try { await run('ROLLBACK'); } catch (_) {}
+
+    if (String(error.message).includes('UNIQUE constraint failed')) {
+      return res.status(409).json({ ok: false, error: 'Annotation ID already exists' });
+    }
+    return res.status(400).json({ ok: false, error: error.message });
+  }
 });
 
-// Step 8: Get annotations for a page URL with entities and notes
-app.get('/annotations', (req, res) => {
+app.get('/annotations', async (req, res) => {
   const pageUrl = req.query.url;
-
   if (!pageUrl) {
     return res.status(400).json({ ok: false, error: 'URL query parameter is required' });
   }
 
-  const annotationsSql = `SELECT * FROM annotations WHERE page_url = ?`;
+  try {
+    const annotations = await all(
+      `SELECT id FROM annotations WHERE page_url = ? ORDER BY created_at, id`,
+      [pageUrl]
+    );
+    const result = [];
 
-  db.all(annotationsSql, [pageUrl], (err, annotations) => {
-    if (err) {
-      return res.status(500).json({ ok: false, error: err.message });
+    for (const annotation of annotations) {
+      result.push(await getAnnotationById(annotation.id));
     }
 
-    if (!annotations || annotations.length === 0) {
-      return res.json({ ok: true, data: [] });
-    }
-
-    const annotationIds = annotations.map(a => a.id);
-    const placeholders = annotationIds.map(() => '?').join(',');
-
-    const entitiesSql = `SELECT id, annotation_id, text, type, start_offset AS start, end_offset AS end FROM entities WHERE annotation_id IN (${placeholders})`;
-    const notesSql = `SELECT id, annotation_id, text, created_at FROM notes WHERE annotation_id IN (${placeholders})`;
-
-    db.all(entitiesSql, annotationIds, (entErr, entities) => {
-      if (entErr) {
-        return res.status(500).json({ ok: false, error: entErr.message });
-      }
-
-      db.all(notesSql, annotationIds, (noteErr, notes) => {
-        if (noteErr) {
-          return res.status(500).json({ ok: false, error: noteErr.message });
-        }
-
-        const result = annotations.map(annotation => {
-          return {
-            id: annotation.id,
-            user_id: annotation.user_id,
-            page_url: annotation.page_url,
-            selected_text: annotation.selected_text,
-            prefix: annotation.prefix,
-            suffix: annotation.suffix,
-            start_offset: annotation.offset_start,
-            end_offset: annotation.offset_end,
-            created_at: annotation.created_at,
-            entities: (entities || []).filter(e => e.annotation_id === annotation.id).map(e => ({
-              id: e.id,
-              text: e.text,
-              type: e.type,
-              start: e.start,
-              end: e.end
-            })),
-            notes: (notes || []).filter(n => n.annotation_id === annotation.id).map(n => ({
-              id: n.id,
-              text: n.text,
-              created_at: n.created_at
-            }))
-          };
-        });
-
-        res.json({ ok: true, data: result });
-      });
-    });
-  });
+    return res.json({ ok: true, data: result });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message });
+  }
 });
 
-// Step 9: Add a new note to an annotation
-app.post('/annotations/:id/notes', (req, res) => {
+app.post('/annotations/:id/notes', async (req, res) => {
   const annotationId = req.params.id;
-  const { text } = req.body;
+  const { text } = req.body || {};
 
-  if (!text || typeof text !== 'string' || text.trim() === '') {
+  if (typeof text !== 'string' || text.trim() === '') {
     return res.status(400).json({ ok: false, error: 'Note text cannot be empty' });
   }
 
-  db.get('SELECT id FROM annotations WHERE id = ?', [annotationId], (err, row) => {
-    if (err) return res.status(500).json({ ok: false, error: err.message });
-    if (!row) return res.status(404).json({ ok: false, error: 'Annotation not found' });
+  try {
+    const annotation = await get('SELECT id FROM annotations WHERE id = ?', [annotationId]);
+    if (!annotation) return res.status(404).json({ ok: false, error: 'Annotation not found' });
 
     const createdAt = new Date().toISOString();
-    const insertSql = `INSERT INTO notes (annotation_id, text, created_at) VALUES (?, ?, ?)`;
+    const result = await run(
+      `INSERT INTO notes (annotation_id, text, created_at) VALUES (?, ?, ?)`,
+      [annotationId, text, createdAt]
+    );
 
-    db.run(insertSql, [annotationId, text, createdAt], function(runErr) {
-      if (runErr) return res.status(500).json({ ok: false, error: runErr.message });
-
-      res.status(201).json({
-        ok: true,
-        data: {
-          id: this.lastID,
-          annotation_id: annotationId,
-          text,
-          created_at: createdAt
-        }
-      });
+    return res.status(201).json({
+      ok: true,
+      data: { id: result.lastID, annotation_id: annotationId, text, created_at: createdAt }
     });
-  });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message });
+  }
 });
 
-// Step 9: Update an existing note
-app.put('/notes/:id', (req, res) => {
+app.put('/notes/:id', async (req, res) => {
   const noteId = req.params.id;
-  const { text } = req.body;
+  const { text } = req.body || {};
 
-  if (!text || typeof text !== 'string' || text.trim() === '') {
+  if (typeof text !== 'string' || text.trim() === '') {
     return res.status(400).json({ ok: false, error: 'Note text cannot be empty' });
   }
 
-  const updateSql = `UPDATE notes SET text = ? WHERE id = ?`;
+  try {
+    const result = await run('UPDATE notes SET text = ? WHERE id = ?', [text, noteId]);
+    if (result.changes === 0) return res.status(404).json({ ok: false, error: 'Note not found' });
 
-  db.run(updateSql, [text, noteId], function(err) {
-    if (err) return res.status(500).json({ ok: false, error: err.message });
-    if (this.changes === 0) return res.status(404).json({ ok: false, error: 'Note not found' });
-
-    res.json({
-      ok: true,
-      data: {
-        id: Number(noteId),
-        text
-      }
-    });
-  });
+    const note = await get(
+      `SELECT id, annotation_id, text, created_at FROM notes WHERE id = ?`,
+      [noteId]
+    );
+    return res.json({ ok: true, data: note });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message });
+  }
 });
 
-// Step 9: Delete a note
-app.delete('/notes/:id', (req, res) => {
-  const noteId = req.params.id;
-  const deleteSql = `DELETE FROM notes WHERE id = ?`;
-
-  db.run(deleteSql, [noteId], function(err) {
-    if (err) return res.status(500).json({ ok: false, error: err.message });
-    if (this.changes === 0) return res.status(404).json({ ok: false, error: 'Note not found' });
-
-    res.json({ ok: true, deleted: true });
-  });
+app.delete('/notes/:id', async (req, res) => {
+  try {
+    const result = await run('DELETE FROM notes WHERE id = ?', [req.params.id]);
+    if (result.changes === 0) return res.status(404).json({ ok: false, error: 'Note not found' });
+    return res.json({ ok: true, deleted: true });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message });
+  }
 });
 
-// Step 10: Delete an entire annotation
-app.delete('/annotations/:id', (req, res) => {
-  const annotationId = req.params.id;
-  const deleteSql = `DELETE FROM annotations WHERE id = ?`;
-
-  db.run(deleteSql, [annotationId], function(err) {
-    if (err) return res.status(500).json({ ok: false, error: err.message });
-    if (this.changes === 0) return res.status(404).json({ ok: false, error: 'Annotation not found' });
-
-    res.json({ ok: true, deleted: true });
-  });
+app.delete('/annotations/:id', async (req, res) => {
+  try {
+    const result = await run('DELETE FROM annotations WHERE id = ?', [req.params.id]);
+    if (result.changes === 0) return res.status(404).json({ ok: false, error: 'Annotation not found' });
+    return res.json({ ok: true, deleted: true });
+  } catch (error) {
+    return res.status(500).json({ ok: false, error: error.message });
+  }
 });
 
 app.listen(PORT, () => {

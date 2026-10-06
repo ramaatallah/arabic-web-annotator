@@ -135,19 +135,6 @@ def has_word_boundaries(text, start, end):
 
     return True
 
-    # الحرف بعد الكيان يجب ألا يكون حرفًا عربيًا.
-    # هذا يمنع "فلسطين" داخل "الفلسطيني".
-    if is_arabic_letter(after):
-        return False
-
-    # إذا كان قبل الكيان حرف عربي، يجب أن يكون
-    # أحد البادئات المسموح بها: و / ب / ل.
-    if is_arabic_letter(before):
-        if before not in ATTACHED_PREFIXES:
-            return False
-
-    return True
-
 
 def clean_entity_prefix(text, start, end):
     entity_text = text[start:end]
@@ -207,6 +194,10 @@ def find_gazetteer_entities(text):
 # =========================
 # Model entity type mapping
 # =========================
+
+def to_utf16_offset(text, index):
+    return len(text[:index].encode("utf-16-le")) // 2
+
 
 def map_model_type(entity_group):
     if not entity_group:
@@ -302,8 +293,8 @@ def merge_entities(text, model_entities, gazetteer_entities):
             {
                 "text": entity["text"],
                 "type": entity["type"],
-                "start": entity["start"],
-                "end": entity["end"],
+                "start": to_utf16_offset(text, entity["start"]),
+                "end": to_utf16_offset(text, entity["end"]),
             }
         )
 
