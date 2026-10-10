@@ -1,27 +1,83 @@
 <!DOCTYPE html>
-<html lang="ar" dir="rtl">
+<html lang="en" dir="ltr">
 <head>
   <meta charset="UTF-8">
-  <title>الإضافة</title>
+  <title>Extension Popup</title>
   <style>
     body {
-      width: 200px;
+      width: 280px;
       padding: 15px;
-      font-family: sans-serif;
-      text-align: center;
+      font-family: Arial, sans-serif;
+      background-color: #f9f9f9;
+      color: #333;
+      margin: 0;
     }
-    .toggle-container {
+
+    .header {
       display: flex;
       align-items: center;
       justify-content: space-between;
+      border-bottom: 1px solid #ddd;
+      padding-bottom: 10px;
+      margin-bottom: 15px;
+    }
+
+    .header span {
+      font-weight: bold;
+      font-size: 14px;
+    }
+
+    .highlights-container {
+      max-height: 250px;
+      overflow-y: auto;
+    }
+
+    .highlight-item {
+      background: #ffffff;
+      border-left: 4px solid #007bff;
+      padding: 8px 10px;
+      margin-bottom: 10px;
+      border-radius: 4px;
+      box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
+    }
+
+    .highlight-text {
+      font-size: 13px;
+      color: #222;
+      margin-bottom: 4px;
+      line-height: 1.4;
+    }
+
+    .highlight-note {
+      font-size: 11px;
+      color: #666;
+      background: #f0f4f8;
+      padding: 4px 6px;
+      border-radius: 3px;
+      margin-top: 4px;
+    }
+
+    .empty-state {
+      font-size: 12px;
+      color: #888;
+      text-align: center;
+      padding: 10px 0;
     }
   </style>
 </head>
 <body>
-  <div class="toggle-container">
-    <span>تفعيل الإضافة</span>
-    <input type="checkbox" id="toggle-enable">
+
+  
+  <div class="header">
+    <span>Enable Extension</span>
+    <input type="checkbox" id="enableToggle">
   </div>
+
+  <!-- Highlights & Notes List Container -->
+  <div class="highlights-container" id="highlightsList">
+    <!-- Highlighted text and notes will be rendered here -->
+  </div>
+
   <script src="popup.js"></script>
 </body>
 </html>
